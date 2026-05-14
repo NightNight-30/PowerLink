@@ -1,0 +1,36 @@
+{
+  "apis": {
+    "819": {
+      "name": "企业基本信息（含主要人员）",
+      "url": "http://open.api.tianyancha.com/services/open/ic/baseinfoV3/2.0",
+      "token": "<YOUR_TYC_TOKEN>",
+      "timeout": 30
+    },
+    "967": {
+      "name": "主要指标-年度",
+      "url": "",
+      "token": "",
+      "timeout": 30
+    },
+    "971": {
+      "name": "利润表",
+      "url": "",
+      "token": "",
+      "timeout": 30
+    },
+    "973": {
+      "name": "现金流量表",
+      "url": "",
+      "token": "",
+      "timeout": 30
+    }
+  },
+  "mysql": {
+    "host": "host.docker.internal",
+    "port": 3306,
+    "user": "<YOUR_DB_USER>",
+    "password": "<YOUR_DB_PASSWORD>",
+    "database": "powerlink",
+    "charset": "utf8mb4"
+  }
+}
