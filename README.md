@@ -10,7 +10,9 @@ PowerLink/
 │   └── api_call_record.sql
 ├── etl_script/             # ETL脚本（拉取+解析）
 │   ├── 819-step1_api_fetch.py
-│   └── 819-step2_data_parse.py
+│   ├── 819-step2_data_parse.py
+│   ├── 1058-step1_api_fetch.py
+│   └── 1058-step2_data_parse.py
 ├── config/                 # 配置文件
 │   └── config.json.example
 ├── tools/                  # 辅助工具
@@ -99,8 +101,9 @@ python3 819-step2_data_parse.py "广东领益智造股份有限公司"
 
 在 `powerlink` 库下建表：
 - `api_call_record` — 三方接口调用记录表（7个字段）
-- `company_819_info` — 企业基本信息表（63个字段，含industryAll展开8列、staffList拆2列、api_record_id关联）
+- `company_819_info` — 企业基本信息表（65个字段，含industryAll展开8列、staffList拆2列、api_record_id关联）
 - `customer_info` — 客户公司列表（3个字段）
+- `company_1058_risk_info` — 企业天眼风险表（16个字段，1:N关系，3层嵌套展平）
 
 ---
 
@@ -120,6 +123,58 @@ python3 819-step2_data_parse.py "广东领益智造股份有限公司"
 - 每表一个sheet（表概览 + 字段明细）
 - 字段明细12列：序号 / 字段名 / 中文名 / 类型 / 长度 / 主键 / 空值 / 默认值 / 来源 / 原始路径 / 转换规则 / 备注
 - 原始字段路径使用完整嵌套名（如 `result.industryAll.categoryCodeFourth`）
+- 1058表使用3层嵌套路径（如 `result.riskList[].list[].list[].id`）
+
+---
+
+### [1058-step1_api_fetch.py](etl_script/1058-step1_api_fetch.py) — API数据拉取（1058接口）
+
+从天眼查1058接口拉取企业天眼风险数据，原始响应完整存入 `api_call_record` 表。
+
+与819-step1完全同构，调用规则相同（幂等检查 + 事不过三重试）。
+
+**执行方式：**
+
+```bash
+python3 1058-step1_api_fetch.py
+python3 1058-step1_api_fetch.py "广东领益智造股份有限公司"
+```
+
+---
+
+### [1058-step2_data_parse.py](etl_script/1058-step2_data_parse.py) — 数据解析（3层嵌套展平）
+
+从 `api_call_record` 读取当天成功记录，将3层嵌套数据展平后写入 `company_1058_risk_info` 表。
+
+**核心差异（与819对比）：**
+
+| 维度 | 819 | 1058 |
+|:-----|:----|:------|
+| 数据关系 | 1公司→1行 | 1公司→N行 |
+| 嵌套层级 | 1层扁平 | riskList→list→list 3层嵌套 |
+| 入库方式 | ON DUPLICATE KEY UPDATE | DELETE旧数据 + INSERT新数据 |
+| 主公司名来源 | API返回的name | 搜索入参input_param |
+
+**解析规则（纯Python实现json_normalize等效逻辑）：**
+
+| API路径 | DB列名 | 说明 |
+|:---------|:-------|:-----|
+| `input_param` | `main_company_name` | 来自搜索入参，非API返回 |
+| `result.riskLevel` | `risk_level` | 顶层字段 |
+| `riskList[].count` | `risk_category_count` | 风险类别下的条数 |
+| `riskList[].name` | `risk_category_name` | 自身风险/周边风险/历史风险/预警提醒 |
+| `riskList[].list[].total` | `risk_type_total` | 风险类型组下的条数 |
+| `riskList[].list[].tag` | `risk_type_tag` | 警示/高风险/提示信息 |
+| `riskList[].list[].list[].id` | `risk_id` | 重命名避免与表主键冲突 |
+| `riskList[].list[].list[].companyId` | `company_id` | 可空 |
+| `riskList[].list[].list[].companyName` | `company_name` | 可空 |
+
+**执行方式：**
+
+```bash
+python3 1058-step2_data_parse.py
+python3 1058-step2_data_parse.py "广东领益智造股份有限公司"
+```
 
 ## 运行环境
 
@@ -142,13 +197,19 @@ cp config/config.json.example config/config.json
 # 2. 执行DDL建表
 mysql -u root -p powerlink < ddl/api_call_record.sql
 
-# 3. 拉取数据
+# 3. 拉取数据（819接口）
 python3 etl_script/819-step1_api_fetch.py
 
-# 4. 解析数据
+# 4. 解析数据（819接口）
 python3 etl_script/819-step2_data_parse.py
 
-# 5. 生成数据字典
+# 5. 拉取数据（1058接口）
+python3 etl_script/1058-step1_api_fetch.py
+
+# 6. 解析数据（1058接口）
+python3 etl_script/1058-step2_data_parse.py
+
+# 7. 生成数据字典
 python3 tools/gen_data_dict.py
 ```
 

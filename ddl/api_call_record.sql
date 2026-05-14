@@ -101,3 +101,27 @@ CREATE TABLE IF NOT EXISTS customer_info (
 
 -- 插入测试公司
 INSERT IGNORE INTO customer_info (customer_name) VALUES ('广东领益智造股份有限公司');
+
+-- 4. 企业天眼风险表 (1058接口解析目标)
+-- 解析规则：3层嵌套展平（riskList→list→list），1:N关系
+-- 每家公司每条风险记录为一行
+CREATE TABLE IF NOT EXISTS company_1058_risk_info (
+  id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_record_id       BIGINT              COMMENT 'API调用记录ID(关联api_call_record.id)',
+  data_create_time    DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  main_company_name   VARCHAR(200) NOT NULL COMMENT '主公司名(搜索关键字/入参)',
+  risk_level          VARCHAR(50)          COMMENT '风险等级(result.riskLevel)',
+  risk_category_count INT                  COMMENT '该风险类别下的风险条数(riskList[].count)',
+  risk_category_name  VARCHAR(50)          COMMENT '风险类别名(riskList[].name: 自身风险/周边风险/历史风险/预警提醒)',
+  risk_type_total     INT                  COMMENT '该风险类型下的条数(riskList[].list[].total)',
+  risk_type_tag       VARCHAR(50)          COMMENT '风险标签(riskList[].list[].tag: 警示/高风险/提示信息)',
+  company_id          BIGINT               COMMENT '涉及公司ID(riskList[].list[].list[].companyId, 可空)',
+  company_name        VARCHAR(200)         COMMENT '涉及公司名(riskList[].list[].list[].companyName, 可空)',
+  risk_id             BIGINT               COMMENT '风险条目ID(riskList[].list[].list[].id)',
+  risk_count          INT                  COMMENT '风险数量(riskList[].list[].list[].riskCount)',
+  risk_title          VARCHAR(500)         COMMENT '风险描述(riskList[].list[].list[].title)',
+  risk_type           INT                  COMMENT '风险类型码(riskList[].list[].list[].type)',
+  risk_desc           VARCHAR(200)         COMMENT '风险简述(riskList[].list[].list[].desc)',
+  INDEX idx_main_company (main_company_name),
+  INDEX idx_api_record (api_record_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='企业天眼风险(1058接口)';

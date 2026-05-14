@@ -214,6 +214,37 @@ fields3 = [
 
 write_sheet(ws3, overview3, fields3)
 
+# ========== Sheet4: company_1058_risk_info ==========
+ws4 = wb.create_sheet('company_1058_risk_info')
+
+overview4 = [
+    ('数据库', 'powerlink'), ('表名', 'company_1058_risk_info'), ('表描述', '企业天眼风险(1058接口)'),
+    ('引擎', 'InnoDB'), ('字符集', 'utf8mb4'), ('所属系统', '天眼查数据接入'),
+    ('数据关系', '1:N(1公司→N条风险记录)'), ('创建日期', '2026-05-14'),
+    ('解析规则说明', '3层嵌套展平(riskList→list→list); DELETE旧数据+INSERT新数据; main_company_name来自搜索入参'),
+]
+
+fields4 = [
+    (1, 'id', '主键ID', 'BIGINT', '', 'Y', 'N', '自增', '内部', '-', '-', '自增主键'),
+    (2, 'api_record_id', 'API调用记录ID', 'BIGINT', '', 'N', 'Y', '', '内部', 'api_call_record.id', '-', '关联api_call_record表，可追溯原始API调用'),
+    (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
+    (4, 'main_company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'N', 'N', '', '内部', '-', '-', '来自搜索入参(input_param)，非API返回'),
+    (5, 'risk_level', '风险等级', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.riskLevel', '-', '顶层风险等级'),
+    (6, 'risk_category_count', '风险类别下的条数', 'INT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].count', '3层嵌套展平meta字段', '该风险类别下的风险条数'),
+    (7, 'risk_category_name', '风险类别名', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.riskList[].name', '3层嵌套展平meta字段', '自身风险/周边风险/历史风险/预警提醒'),
+    (8, 'risk_type_total', '风险类型下的条数', 'INT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].total', '3层嵌套展平meta字段', '该风险类型组下的条数'),
+    (9, 'risk_type_tag', '风险标签', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].tag', '3层嵌套展平meta字段', '警示/高风险/提示信息'),
+    (10, 'company_id', '涉及公司ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].companyId', '-', '可空，风险涉及的公司ID'),
+    (11, 'company_name', '涉及公司名', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].companyName', '空字符串→NULL', '可空，风险涉及的公司名'),
+    (12, 'risk_id', '风险条目ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].id', '字段映射: id→risk_id', '避免与表主键冲突'),
+    (13, 'risk_count', '风险数量', 'INT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].riskCount', '-', ''),
+    (14, 'risk_title', '风险描述', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].title', '-', '风险详情描述'),
+    (15, 'risk_type', '风险类型码', 'INT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].type', '-', '风险类型编码'),
+    (16, 'risk_desc', '风险简述', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].desc', '-', '风险简要分类描述'),
+]
+
+write_sheet(ws4, overview4, fields4)
+
 # ========== 保存 ==========
 output_path = '/Users/wangshuaijia/workspace/tyc/数据字典_powerlink.xlsx'
 wb.save(output_path)
