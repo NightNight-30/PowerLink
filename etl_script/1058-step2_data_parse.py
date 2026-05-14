@@ -134,6 +134,8 @@ def parse_risk_data(api_result: Dict, keyword: str, record_id: int) -> List[Dict
         return []
 
     risk_level = result.get('riskLevel')
+    if risk_level == '' or risk_level is None:
+        risk_level = None
     risk_list = result.get('riskList', [])
 
     if not risk_list:
