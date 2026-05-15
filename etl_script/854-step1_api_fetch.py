@@ -125,7 +125,7 @@ def delete_today_failure_records(keyword: str):
 
 def call_api(keyword: str) -> Dict[str, Any]:
     api_config = get_api_config()
-    headers = {'Authorization': api_config['token']}
+    headers = {'Authorization': CONFIG['providers'][api_config['provider']]['token']}
     params = {'keyword': keyword}
 
     print(f"[INFO] 调用API: {keyword}")

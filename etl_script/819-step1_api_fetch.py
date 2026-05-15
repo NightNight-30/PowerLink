@@ -129,7 +129,7 @@ def has_success_today(keyword: str) -> bool:
 def call_api(keyword: str) -> Dict[str, Any]:
     """调用天眼查819API"""
     api_config = get_api_config()
-    headers = {'Authorization': api_config['token']}
+    headers = {'Authorization': CONFIG['providers'][api_config['provider']]['token']}
     params = {'keyword': keyword}
 
     print(f"[INFO] 调用API: {keyword}")

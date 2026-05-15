@@ -1,45 +1,49 @@
 {
+  "providers": {
+    "tyc": { "token": "<YOUR_TYC_TOKEN>" },
+    "dnb": { "token": "<YOUR_DNB_TOKEN>" }
+  },
   "apis": {
     "819": {
       "name": "企业基本信息（含主要人员）",
       "url": "http://open.api.tianyancha.com/services/open/ic/baseinfoV3/2.0",
-      "token": "<YOUR_TYC_TOKEN>",
+      "provider": "tyc",
       "timeout": 30
     },
     "1058": {
       "name": "企业天眼风险",
       "url": "http://open.api.tianyancha.com/services/open/risk/riskInfo/2.0",
-      "token": "<YOUR_TYC_TOKEN>",
+      "provider": "tyc",
       "timeout": 30
     },
     "822": {
       "name": "变更记录",
       "url": "http://open.api.tianyancha.com/services/open/ic/changeinfo/2.0",
-      "token": "<YOUR_TYC_TOKEN>",
+      "provider": "tyc",
       "timeout": 30
     },
     "854": {
       "name": "上市公司企业简介",
       "url": "http://open.api.tianyancha.com/services/open/stock/companyInfo/2.0",
-      "token": "<YOUR_TYC_TOKEN>",
+      "provider": "tyc",
       "timeout": 30
     },
     "967": {
       "name": "主要指标-年度",
       "url": "",
-      "token": "",
+      "provider": "tyc",
       "timeout": 30
     },
     "971": {
       "name": "利润表",
       "url": "",
-      "token": "",
+      "provider": "tyc",
       "timeout": 30
     },
     "973": {
       "name": "现金流量表",
       "url": "",
-      "token": "",
+      "provider": "tyc",
       "timeout": 30
     }
   },

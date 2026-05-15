@@ -44,6 +44,7 @@ PowerLink/
 | 幂等检查 | 查当天 `api_call_record`，已有 `status_code=0` 的成功记录则跳过，不重复调用 |
 | 重试机制 | 事不过三：每次运行都尝试调用（即使当天已有失败记录也继续），最多3次。重试过程不插入DB，最终失败时先删除旧失败记录再插入1条最新错误信息 |
 | interface_name | 使用 `config.json` 中 `apis.{接口号}.name` 的值（如'企业基本信息（含主要人员）'、'变更记录'），而非硬编码接口号 |
+| token来源 | 通过 `apis.{接口号}.provider` 关联到 `providers` 统一管理，token续费只改一处 |
 | 原始保存 | API完整响应存入 `output_result` JSON列，失败时存错误详情JSON（error_type/error_code/error_msg/traceback） |
 | 状态码约定 | `status_code=0` 成功；负数=异常（-1 HTTP异常，-2 其他异常）；正数=API业务错误码 |
 
@@ -61,7 +62,7 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 | 关联追溯 | 带出 `api_call_record.id` 写入 `api_record_id`；`data_create_time` 自动记录 |
 | 主公司名来源 | 来自搜索入参 `input_param`，非API返回的name字段 |
 | 空值规范 | 空字符串 `""` 和 `0` → NULL |
-| 空结果跳过 | 部分接口（如854）对非上市公司返回成功但result为空，step2跳过不插入 |
+| 空结果/非目标公司 | 部分接口（如854）对非上市公司返回error_code=300000，step1记录为失败，step2天然跳过 |
 
 ---
 
@@ -205,7 +206,9 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 ## [config.json.example](config/config.json.example) — 配置模板
 
 使用前复制为 `config.json` 并填入真实值：
-- `apis.*.token` — 天眼查API授权token
+- `apis.*.token` — 已移除，改用 `providers` 统一管理
+- `providers.tyc.token` — 天眼查API授权token
+- `providers.dnb.token` — 邓白氏API授权token
 - `mysql.user / mysql.password` — MySQL账号密码
 
 **注意：** `config.json` 包含敏感信息，已在 `.gitignore` 中排除，不会提交到仓库。
@@ -272,3 +275,5 @@ python3 tools/gen_data_dict.py
 | 5 | `BRNNumber` → `b_r_n_number` | FIELD_MAPPING 显式映射 → `brn_number` |
 | 6 | `id` 字段与表主键冲突 | 显式映射 id→company_id/risk_id 等 |
 | 7 | 失败3次产生3条重复记录，且失败后SKIP阻止重试 | 每次都尝试（不跳过失败），最终失败时delete旧记录+insert最新1条 |
+| 8 | 854-step2假设result为空需跳过 | 非上市公司返回error_code=300000，移除`if not result`死代码 |
+| 9 | config.json每个API重复携带相同token | 改为顶层`providers`统一管理，各API用`provider`字段关联 |
