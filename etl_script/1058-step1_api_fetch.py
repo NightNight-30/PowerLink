@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 
-INTERFACE_NAME = '1058'
+INTERFACE_KEY = '1058'
 MAX_RETRY = 3
 
 
@@ -38,10 +38,11 @@ def load_config() -> Dict:
 
 
 CONFIG = load_config()
+INTERFACE_NAME = CONFIG['apis'][INTERFACE_KEY]['name']
 
 
 def get_api_config() -> Dict:
-    return CONFIG['apis'][INTERFACE_NAME]
+    return CONFIG['apis'][INTERFACE_KEY]
 
 
 def get_db_connection() -> pymysql.Connection:
@@ -240,7 +241,7 @@ def process_company(keyword: str) -> str:
 
 def main():
     print("=" * 60)
-    print(f"【Step1】天眼查{INTERFACE_NAME}接口 - API数据拉取")
+    print(f"【Step1】天眼查{INTERFACE_KEY}接口({INTERFACE_NAME}) - API数据拉取")
     print("=" * 60)
     print(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"接口: {get_api_config()['name']}")

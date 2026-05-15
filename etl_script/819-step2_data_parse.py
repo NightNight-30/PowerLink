@@ -28,7 +28,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 
-INTERFACE_NAME = '819'
+INTERFACE_KEY = '819'
 
 # 时间戳字段：API原始key → 转换为datetime后存入的DB列名
 TIMESTAMP_FIELDS = {
@@ -68,6 +68,7 @@ def load_config() -> Dict:
 
 
 CONFIG = load_config()
+INTERFACE_NAME = CONFIG['apis'][INTERFACE_KEY]['name']
 
 
 def get_db_connection() -> pymysql.Connection:
@@ -293,7 +294,7 @@ def parse_and_insert(keyword: str, api_result: Dict, valid_columns: List[str], r
 
 def main():
     print("=" * 60)
-    print(f"【Step2】天眼查{INTERFACE_NAME}接口 - 数据解析")
+    print(f"【Step2】天眼查{INTERFACE_KEY}接口({INTERFACE_NAME}) - 数据解析")
     print("=" * 60)
     print(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("解析规则:")

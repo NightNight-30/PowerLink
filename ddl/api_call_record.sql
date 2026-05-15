@@ -125,3 +125,21 @@ CREATE TABLE IF NOT EXISTS company_1058_risk_info (
   INDEX idx_main_company (main_company_name),
   INDEX idx_api_record (api_record_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='企业天眼风险(1058接口)';
+
+-- 5. 变更记录表 (822接口解析目标)
+-- 解析规则：2层展平（result.items数组），1:N关系
+-- 每家公司每条变更记录为一行
+CREATE TABLE IF NOT EXISTS company_822_change_info (
+  id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_record_id    BIGINT              COMMENT 'API调用记录ID(关联api_call_record.id)',
+  data_create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  company_name     VARCHAR(200) NOT NULL COMMENT '主公司名(搜索关键字/入参)',
+  total            INT                  COMMENT '变更记录总数(result.total)',
+  change_item      VARCHAR(200)         COMMENT '变更项名称(result.items[].changeItem)',
+  content_before   TEXT                 COMMENT '变更前内容(result.items[].contentBefore)',
+  content_after    TEXT                 COMMENT '变更后内容(result.items[].contentAfter)',
+  change_time      VARCHAR(20)          COMMENT '变更时间(result.items[].changeTime)',
+  create_time      VARCHAR(20)          COMMENT '记录创建时间(result.items[].createTime)',
+  INDEX idx_company_name (company_name),
+  INDEX idx_api_record (api_record_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='变更记录(822接口)';

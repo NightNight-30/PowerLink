@@ -245,6 +245,31 @@ fields4 = [
 
 write_sheet(ws4, overview4, fields4)
 
+# ========== Sheet5: company_822_change_info ==========
+ws5 = wb.create_sheet('company_822_change_info')
+
+overview5 = [
+    ('数据库', 'powerlink'), ('表名', 'company_822_change_info'), ('表描述', '变更记录(822接口)'),
+    ('引擎', 'InnoDB'), ('字符集', 'utf8mb4'), ('所属系统', '天眼查数据接入'),
+    ('数据关系', '1:N(1公司→N条变更记录)'), ('创建日期', '2026-05-15'),
+    ('解析规则说明', '2层展平(result.items数组); DELETE旧数据+INSERT新数据; company_name来自搜索入参'),
+]
+
+fields5 = [
+    (1, 'id', '主键ID', 'BIGINT', '', 'Y', 'N', '自增', '内部', '-', '-', '自增主键'),
+    (2, 'api_record_id', 'API调用记录ID', 'BIGINT', '', 'N', 'Y', '', '内部', 'api_call_record.id', '-', '关联api_call_record表'),
+    (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
+    (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'N', 'N', '', '内部', '-', '-', '来自搜索入参(input_param)，非API返回'),
+    (5, 'total', '变更记录总数', 'INT', '', 'N', 'Y', '', '天眼查', 'result.total', '2层展平meta字段', '变更记录总条数'),
+    (6, 'change_item', '变更项名称', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].changeItem', '驼峰→下划线', '如: 经营范围变更'),
+    (7, 'content_before', '变更前内容', 'TEXT', '', 'N', 'Y', '', '天眼查', 'result.items[].contentBefore', '空字符串→NULL', ''),
+    (8, 'content_after', '变更后内容', 'TEXT', '', 'N', 'Y', '', '天眼查', 'result.items[].contentAfter', '空字符串→NULL', ''),
+    (9, 'change_time', '变更时间', 'VARCHAR', '20', 'N', 'Y', '', '天眼查', 'result.items[].changeTime', '-', '日期字符串，如2025-03-26'),
+    (10, 'create_time', '记录创建时间', 'VARCHAR', '20', 'N', 'Y', '', '天眼查', 'result.items[].createTime', '-', '日期字符串，如2025-03-27'),
+]
+
+write_sheet(ws5, overview5, fields5)
+
 # ========== 保存 ==========
 output_path = '/Users/wangshuaijia/workspace/tyc/数据字典_powerlink.xlsx'
 wb.save(output_path)
