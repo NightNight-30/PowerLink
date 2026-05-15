@@ -28,21 +28,27 @@
       "provider": "tyc",
       "timeout": 30
     },
+    "1168": {
+      "name": "组织机构",
+      "url": "http://open.api.tianyancha.com/services/open/ic/companyType/v2",
+      "provider": "tyc",
+      "timeout": 30
+    },
+    "1149": {
+      "name": "企业规模",
+      "url": "http://open.api.tianyancha.com/services/open/ic/scale",
+      "provider": "tyc",
+      "timeout": 30
+    },
     "967": {
       "name": "主要指标-年度",
-      "url": "",
+      "url": "http://open.api.tianyancha.com/services/open/stock/mainIndex/2.0",
       "provider": "tyc",
       "timeout": 30
     },
-    "971": {
-      "name": "利润表",
-      "url": "",
-      "provider": "tyc",
-      "timeout": 30
-    },
-    "973": {
-      "name": "现金流量表",
-      "url": "",
+    "1114": {
+      "name": "法律诉讼",
+      "url": "http://open.api.tianyancha.com/services/open/jr/lawSuit/3.0",
       "provider": "tyc",
       "timeout": 30
     }

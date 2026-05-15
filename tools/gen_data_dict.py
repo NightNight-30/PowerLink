@@ -321,6 +321,149 @@ fields6 = [
 
 write_sheet(ws6, overview6, fields6)
 
+# ========== Sheet7: company_1168_org_type_info ==========
+ws7 = wb.create_sheet('company_1168_org_type_info')
+
+overview7 = [
+    ('数据库', 'powerlink'), ('表名', 'company_1168_org_type_info'), ('表描述', '组织机构类型(1168接口)'),
+    ('引擎', 'InnoDB'), ('字符集', 'utf8mb4'), ('所属系统', '天眼查数据接入'),
+    ('唯一约束', 'company_name'), ('创建日期', '2026-05-15'),
+    ('解析规则说明', '1:1关系, ON DUPLICATE KEY UPDATE; orgTypes/economyTypes数组→逗号分隔level1/level2列'),
+]
+
+fields7 = [
+    (1, 'id', '主键ID', 'BIGINT', '', 'Y', 'N', '自增', '内部', '-', '-', '自增主键'),
+    (2, 'api_record_id', 'API调用记录ID', 'BIGINT', '', 'N', 'Y', '', '内部', 'api_call_record.id', '-', '关联api_call_record表'),
+    (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
+    (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'UK', 'N', '', '内部', '-', '-', '来自搜索入参(input_param)，非API返回'),
+    (5, 'org_type_level1', '一级机构类型', 'TEXT', '', 'N', 'Y', '', '天眼查', 'result.orgTypes[].level1', 'Array+child Object→逗号分隔', '如: 企业,企业'),
+    (6, 'org_type_level2', '二级机构类型', 'TEXT', '', 'N', 'Y', '', '天眼查', 'result.orgTypes[].level2', 'Array+child Object→逗号分隔', '如: 股份有限公司'),
+    (7, 'economy_type_level1', '一级经济类型', 'TEXT', '', 'N', 'Y', '', '天眼查', 'result.economyTypes[].level1', 'Array+child Object→逗号分隔', '如: 民营企业'),
+    (8, 'economy_type_level2', '二级经济类型', 'TEXT', '', 'N', 'Y', '', '天眼查', 'result.economyTypes[].level2', 'Array+child Object→逗号分隔; null→NULL', '如: 央企，可空'),
+]
+
+write_sheet(ws7, overview7, fields7)
+
+# ========== Sheet8: company_1149_scale_info ==========
+ws8 = wb.create_sheet('company_1149_scale_info')
+
+overview8 = [
+    ('数据库', 'powerlink'), ('表名', 'company_1149_scale_info'), ('表描述', '企业规模(1149接口)'),
+    ('引擎', 'InnoDB'), ('字符集', 'utf8mb4'), ('所属系统', '天眼查数据接入'),
+    ('唯一约束', 'company_name'), ('创建日期', '2026-05-15'),
+    ('解析规则说明', '1:1关系, ON DUPLICATE KEY UPDATE; result为简单字符串(如"大型")'),
+]
+
+fields8 = [
+    (1, 'id', '主键ID', 'BIGINT', '', 'Y', 'N', '自增', '内部', '-', '-', '自增主键'),
+    (2, 'api_record_id', 'API调用记录ID', 'BIGINT', '', 'N', 'Y', '', '内部', 'api_call_record.id', '-', '关联api_call_record表'),
+    (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
+    (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'UK', 'N', '', '内部', '-', '-', '来自搜索入参(input_param)，非API返回'),
+    (5, 'company_scale', '企业规模', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result', 'result直接为字符串', '如: 大型/中型/小型'),
+]
+
+write_sheet(ws8, overview8, fields8)
+
+# ========== Sheet9: company_967_main_index_info ==========
+ws9 = wb.create_sheet('company_967_main_index_info')
+
+overview9 = [
+    ('数据库', 'powerlink'), ('表名', 'company_967_main_index_info'), ('表描述', '主要指标-年度(967接口)'),
+    ('引擎', 'InnoDB'), ('字符集', 'utf8mb4'), ('所属系统', '天眼查数据接入'),
+    ('数据关系', '1:N(1公司→N个年度)'), ('创建日期', '2026-05-15'),
+    ('解析规则说明', 'result数组展平,每年度一行; ~28个DECIMAL字段; DELETE旧数据+INSERT新数据; 非上市公司返回300000→step2天然跳过'),
+]
+
+fields9 = [
+    (1, 'id', '主键ID', 'BIGINT', '', 'Y', 'N', '自增', '内部', '-', '-', '自增主键'),
+    (2, 'api_record_id', 'API调用记录ID', 'BIGINT', '', 'N', 'Y', '', '内部', 'api_call_record.id', '-', '关联api_call_record表'),
+    (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
+    (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'N', 'N', '', '内部', '-', '-', '来自搜索入参(input_param)，非API返回'),
+    (5, 'show_year', '年份', 'VARCHAR', '32', 'N', 'Y', '', '天眼查', 'result[].showYear', '驼峰→下划线', '如: 2023, 2024(Q1)'),
+    (6, 'crfgsasr_to_revenue', '销售现金流/营业收入', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].crfgsasr_to_revenue', '-', ''),
+    (7, 'np_atsopc_nrgal_yoy', '扣非净利润同比增长(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].np_atsopc_nrgal_yoy', '-', ''),
+    (8, 'asset_liab_ratio', '资产负债率(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].asset_liab_ratio', '-', ''),
+    (9, 'op_to_revenue', '营业利润/营业收入(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].op_to_revenue', '-', ''),
+    (10, 'revenue_yoy', '营业总收入同比增长(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].revenue_yoy', '-', ''),
+    (11, 'net_profit_atsopc_yoy', '归属净利润同比增长(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].net_profit_atsopc_yoy', '-', ''),
+    (12, 'receivable_turnover_days', '应收账款周转天数(天)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].receivable_turnover_days', '-', ''),
+    (13, 'current_ratio', '流动比率', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].current_ratio', '-', ''),
+    (14, 'operate_cash_flow_ps', '每股经营现金流(元)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].operate_cash_flow_ps', '-', ''),
+    (15, 'gross_selling_rate', '毛利率(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].gross_selling_rate', '-', ''),
+    (16, 'current_liab_to_total_liab', '流动负债/总负债(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].current_liab_to_total_liab', '-', ''),
+    (17, 'quick_ratio', '速动比率', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].quick_ratio', '-', ''),
+    (18, 'fully_dlt_roe', '摊薄净资产收益率(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].fully_dlt_roe', '-', ''),
+    (19, 'tax_rate', '实际税率(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].tax_rate', '-', ''),
+    (20, 'net_interest_of_total_assets', '摊薄总资产收益率(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].net_interest_of_total_assets', '-', ''),
+    (21, 'operating_total_revenue_lrr_sq', '营业总收入滚动环比增长(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].operating_total_revenue_lrr_sq', '-', ''),
+    (22, 'profit_deduct_nrgal_lrr_sq', '扣非净利润滚动环比增长(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].profit_deduct_nrgal_lrr_sq', '-', ''),
+    (23, 'wgt_avg_roe', '加权净资产收益率(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].wgt_avg_roe', '-', ''),
+    (24, 'net_profit_per_share', '每股净资产(元)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].net_profit_per_share', '-', ''),
+    (25, 'ncf_from_oa_to_revenue', '经营现金流/营业收入', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].ncf_from_oa_to_revenue', '-', ''),
+    (26, 'profit_nrgal_sq', '扣非净利润(元)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].profit_nrgal_sq', '-', ''),
+    (27, 'basic_eps', '基本每股收益(元)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].basic_eps', '-', ''),
+    (28, 'net_selling_rate', '净利率(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].net_selling_rate', '-', ''),
+    (29, 'total_capital_turnover', '总资产周转率(次)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].total_capital_turnover', '-', ''),
+    (30, 'net_profit_atsopc_lrr_sq', '归属净利润滚动环比增长(%)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].net_profit_atsopc_lrr_sq', '-', ''),
+    (31, 'inventory_turnover_days', '存货周转天数(天)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].inventory_turnover_days', '-', ''),
+    (32, 'pre_receivable', '预收款/营业收入', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].pre_receivable', '-', ''),
+    (33, 'total_revenue', '营业总收入(元)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].total_revenue', '-', '0是有效值不转NULL'),
+    (34, 'undistri_profit_ps', '每股未分配利润(元)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].undistri_profit_ps', '-', ''),
+    (35, 'dlt_earnings_per_share', '稀释每股收益(元)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].dlt_earnings_per_share', '-', ''),
+    (36, 'net_profit_atsopc', '归属净利润(元)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].net_profit_atsopc', '-', ''),
+    (37, 'basic_e_ps_net_of_nrgal', '扣非每股收益(元)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].basic_e_ps_net_of_nrgal', '-', ''),
+    (38, 'capital_reserve', '每股公积金(元)', 'DECIMAL', '24,4', 'N', 'Y', '', '天眼查', 'result[].capital_reserve', '-', ''),
+]
+
+write_sheet(ws9, overview9, fields9)
+
+# ========== Sheet10: company_1114_lawsuit_info ==========
+ws10 = wb.create_sheet('company_1114_lawsuit_info')
+
+overview10 = [
+    ('数据库', 'powerlink'), ('表名', 'company_1114_lawsuit_info'), ('表描述', '法律诉讼(1114接口)'),
+    ('引擎', 'InnoDB'), ('字符集', 'utf8mb4'), ('所属系统', '天眼查数据接入'),
+    ('数据关系', '1:N(1公司→N条诉讼)'), ('创建日期', '2026-05-15'),
+    ('解析规则说明', 'result.items数组展平,每条诉讼一行; casePersons取前2人展开6列; DELETE旧数据+INSERT新数据; step1含翻页合并存储(天眼查最多500条)'),
+    ('特别备注', '1114接口支持翻页(pageNum/pageSize), step1循环翻页合并存一条api_call_record(JSON类型), 保守方案'),
+]
+
+fields10 = [
+    (1, 'id', '主键ID', 'BIGINT', '', 'Y', 'N', '自增', '内部', '-', '-', '自增主键'),
+    (2, 'api_record_id', 'API调用记录ID', 'BIGINT', '', 'N', 'Y', '', '内部', 'api_call_record.id', '-', '关联api_call_record表'),
+    (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
+    (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'N', 'N', '', '内部', '-', '-', '来自搜索入参(input_param)，非API返回'),
+    (5, 'total', '诉讼记录总数', 'INT', '', 'N', 'Y', '', '天眼查', 'result.total', 'meta字段', '天眼查最多返回500条'),
+    (6, 'lawsuit_id', '诉讼条目ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.items[].id', '字段映射: id→lawsuit_id', '避免与表主键冲突'),
+    (7, 'doc_type', '文书类型', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].docType', '驼峰→下划线', '如: 裁定书/判决书'),
+    (8, 'lawsuit_url', '天眼查URL-Web', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].lawsuitUrl', '驼峰→下划线', ''),
+    (9, 'lawsuit_h5_url', '天眼查URL-H5', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].lawsuitH5Url', '驼峰→下划线', ''),
+    (10, 'title', '案件名称', 'VARCHAR', '1000', 'N', 'Y', '', '天眼查', 'result.items[].title', '-', ''),
+    (11, 'court', '审理法院', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].court', '-', ''),
+    (12, 'judge_time', '裁判日期', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.items[].judgeTime', '驼峰→下划线', '日期字符串'),
+    (13, 'uuid', 'UUID', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].uuid', '-', ''),
+    (14, 'case_no', '案号', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].caseNo', '驼峰→下划线', '如: (2021)京0108民初44534号'),
+    (15, 'case_type', '案件类型', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].caseType', '驼峰→下划线', '如: 民事案件'),
+    (16, 'case_reason', '案由', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].caseReason', '驼峰→下划线', '如: 网络侵权责任纠纷'),
+    (17, 'case_money', '案件金额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].caseMoney', '驼峰→下划线; 空字符串→NULL', ''),
+    (18, 'submit_time', '发布日期', 'DATETIME', '', 'N', 'Y', '', '天眼查', 'result.items[].submitTime', '毫秒时间戳→datetime(≥1e10÷1000)', ''),
+    (19, 'case_result', '案件结果标签', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].result', '字段映射: casePersons[0].result→case_result', '避免与API顶层result混淆'),
+    (20, 'role1', '案件身份1', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].role', 'casePersons取前2人展开', '如: 原告/被告/申请人'),
+    (21, 'gid1', 'ID1', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].gid', 'casePersons展开', '空字符串→NULL'),
+    (22, 'emotion1', '情感倾向1', 'INT', '', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].emotion', 'casePersons展开', '1=正面, 0=中性, -1=负面'),
+    (23, 'sptname1', '疑似名称1', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].sptname', 'casePersons展开; 空字符串→NULL', ''),
+    (24, 'name1', '名称1', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].name', 'casePersons展开', ''),
+    (25, 'type1', '类型1', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].type', 'casePersons展开', '1=人员, 2=公司'),
+    (26, 'role2', '案件身份2', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].role', 'casePersons取前2人展开', '如: 被告/被申请人/被上诉人'),
+    (27, 'gid2', 'ID2', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].gid', 'casePersons展开', '空字符串→NULL'),
+    (28, 'emotion2', '情感倾向2', 'INT', '', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].emotion', 'casePersons展开', '1=正面, 0=中性, -1=负面'),
+    (29, 'sptname2', '疑似名称2', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].sptname', 'casePersons展开; 空字符串→NULL', ''),
+    (30, 'name2', '名称2', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].name', 'casePersons展开', ''),
+    (31, 'type2', '类型2', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].type', 'casePersons展开', '1=人员, 2=公司'),
+]
+
+write_sheet(ws10, overview10, fields10)
+
 # ========== 保存 ==========
 output_path = '/Users/wangshuaijia/workspace/tyc/数据字典_powerlink.xlsx'
 wb.save(output_path)

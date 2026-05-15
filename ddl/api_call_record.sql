@@ -187,3 +187,121 @@ CREATE TABLE IF NOT EXISTS company_854_stock_info (
   introduction            TEXT                COMMENT '简介(result.introduction)',
   UNIQUE KEY uk_company_name (company_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上市公司企业简介(854接口)';
+
+-- 7. 组织机构类型表 (1168接口解析目标)
+-- 解析规则：1:1关系，ON DUPLICATE KEY UPDATE
+-- orgTypes/economyTypes数组 → 逗号分隔字符串，分别拆为level1/level2列
+CREATE TABLE IF NOT EXISTS company_1168_org_type_info (
+  id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_record_id     BIGINT              COMMENT 'API调用记录ID(关联api_call_record.id)',
+  data_create_time  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  company_name      VARCHAR(200) NOT NULL COMMENT '主公司名(搜索关键字/入参)',
+  org_type_level1   TEXT                COMMENT '一级机构类型(result.orgTypes[].level1,逗号分隔)',
+  org_type_level2   TEXT                COMMENT '二级机构类型(result.orgTypes[].level2,逗号分隔)',
+  economy_type_level1 TEXT              COMMENT '一级经济类型(result.economyTypes[].level1,逗号分隔)',
+  economy_type_level2 TEXT              COMMENT '二级经济类型(result.economyTypes[].level2,逗号分隔)',
+  UNIQUE KEY uk_company_name (company_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='组织机构类型(1168接口)';
+
+-- 8. 企业规模表 (1149接口解析目标)
+-- 解析规则：1:1关系，ON DUPLICATE KEY UPDATE
+-- result为简单字符串(如"大型")
+CREATE TABLE IF NOT EXISTS company_1149_scale_info (
+  id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_record_id     BIGINT              COMMENT 'API调用记录ID(关联api_call_record.id)',
+  data_create_time  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  company_name      VARCHAR(200) NOT NULL COMMENT '主公司名(搜索关键字/入参)',
+  company_scale     VARCHAR(50)          COMMENT '企业规模(result字符串,如"大型")',
+  UNIQUE KEY uk_company_name (company_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='企业规模(1149接口)';
+
+-- 9. 主要指标-年度表 (967接口解析目标)
+-- 解析规则：1:N关系，每年度一行，DELETE+INSERT
+-- result为数组，每个年度对象含~28个decimal字段+showYear
+-- 非上市公司返回error_code=300000，step1记录失败，step2天然跳过
+CREATE TABLE IF NOT EXISTS company_967_main_index_info (
+  id                          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_record_id               BIGINT              COMMENT 'API调用记录ID(关联api_call_record.id)',
+  data_create_time            DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  company_name                VARCHAR(200) NOT NULL COMMENT '主公司名(搜索关键字/入参)',
+  show_year                   VARCHAR(32)          COMMENT '年份(result[].showYear)',
+  crfgsasr_to_revenue         DECIMAL(24,4)        COMMENT '销售现金流/营业收入',
+  np_atsopc_nrgal_yoy         DECIMAL(24,4)        COMMENT '扣非净利润同比增长(%)',
+  asset_liab_ratio            DECIMAL(24,4)        COMMENT '资产负债率(%)',
+  op_to_revenue               DECIMAL(24,4)        COMMENT '营业利润/营业收入(%)',
+  revenue_yoy                 DECIMAL(24,4)        COMMENT '营业总收入同比增长(%)',
+  net_profit_atsopc_yoy       DECIMAL(24,4)        COMMENT '归属净利润同比增长(%)',
+  receivable_turnover_days    DECIMAL(24,4)        COMMENT '应收账款周转天数(天)',
+  current_ratio               DECIMAL(24,4)        COMMENT '流动比率',
+  operate_cash_flow_ps        DECIMAL(24,4)        COMMENT '每股经营现金流(元)',
+  gross_selling_rate          DECIMAL(24,4)        COMMENT '毛利率(%)',
+  current_liab_to_total_liab  DECIMAL(24,4)        COMMENT '流动负债/总负债(%)',
+  quick_ratio                 DECIMAL(24,4)        COMMENT '速动比率',
+  fully_dlt_roe               DECIMAL(24,4)        COMMENT '摊薄净资产收益率(%)',
+  tax_rate                    DECIMAL(24,4)        COMMENT '实际税率(%)',
+  net_interest_of_total_assets DECIMAL(24,4)       COMMENT '摊薄总资产收益率(%)',
+  operating_total_revenue_lrr_sq DECIMAL(24,4)     COMMENT '营业总收入滚动环比增长(%)',
+  profit_deduct_nrgal_lrr_sq  DECIMAL(24,4)        COMMENT '扣非净利润滚动环比增长(%)',
+  wgt_avg_roe                 DECIMAL(24,4)        COMMENT '加权净资产收益率(%)',
+  net_profit_per_share        DECIMAL(24,4)        COMMENT '每股净资产(元)',
+  ncf_from_oa_to_revenue      DECIMAL(24,4)        COMMENT '经营现金流/营业收入',
+  profit_nrgal_sq             DECIMAL(24,4)        COMMENT '扣非净利润(元)',
+  basic_eps                   DECIMAL(24,4)        COMMENT '基本每股收益(元)',
+  net_selling_rate            DECIMAL(24,4)        COMMENT '净利率(%)',
+  total_capital_turnover      DECIMAL(24,4)        COMMENT '总资产周转率(次)',
+  net_profit_atsopc_lrr_sq    DECIMAL(24,4)        COMMENT '归属净利润滚动环比增长(%)',
+  inventory_turnover_days     DECIMAL(24,4)        COMMENT '存货周转天数(天)',
+  pre_receivable              DECIMAL(24,4)        COMMENT '预收款/营业收入',
+  total_revenue               DECIMAL(24,4)        COMMENT '营业总收入(元)',
+  undistri_profit_ps          DECIMAL(24,4)        COMMENT '每股未分配利润(元)',
+  dlt_earnings_per_share      DECIMAL(24,4)        COMMENT '稀释每股收益(元)',
+  net_profit_atsopc           DECIMAL(24,4)        COMMENT '归属净利润(元)',
+  basic_e_ps_net_of_nrgal     DECIMAL(24,4)        COMMENT '扣非每股收益(元)',
+  capital_reserve             DECIMAL(24,4)        COMMENT '每股公积金(元)',
+  INDEX idx_company_name (company_name),
+  INDEX idx_api_record (api_record_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='主要指标-年度(967接口)';
+
+-- 10. 法律诉讼表 (1114接口解析目标)
+-- 解析规则：1:N关系，每条诉讼记录一行，DELETE+INSERT
+-- casePersons取前2人：role1/gid1/emotion1/sptname1/name1/type1 + role2/gid2/emotion2/sptname2/name2/type2
+-- submitTime为毫秒时间戳 → datetime
+-- id映射为lawsuit_id避免与表主键冲突
+-- ⚠️ 特别备注：1114接口支持翻页(pageNum/pageSize)，天眼查最多返回500条记录
+--   step1采用循环翻页策略，合并所有页数据存入一条api_call_record(JSON类型可存储大对象)
+--   保守方案：若未来数据量超出JSON存储上限，需考虑分页存储或LONGTEXT替代
+CREATE TABLE IF NOT EXISTS company_1114_lawsuit_info (
+  id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_record_id     BIGINT              COMMENT 'API调用记录ID(关联api_call_record.id)',
+  data_create_time  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  company_name      VARCHAR(200) NOT NULL COMMENT '主公司名(搜索关键字/入参)',
+  total             INT                 COMMENT '诉讼记录总数(result.total)',
+  lawsuit_id        BIGINT              COMMENT '诉讼条目ID(items[].id,避免与表主键冲突)',
+  doc_type          VARCHAR(200)        COMMENT '文书类型(items[].docType)',
+  lawsuit_url       VARCHAR(500)        COMMENT '天眼查URL-Web(items[].lawsuitUrl)',
+  lawsuit_h5_url    VARCHAR(500)        COMMENT '天眼查URL-H5(items[].lawsuitH5Url)',
+  title             VARCHAR(1000)       COMMENT '案件名称(items[].title)',
+  court             VARCHAR(200)        COMMENT '审理法院(items[].court)',
+  judge_time        VARCHAR(50)         COMMENT '裁判日期(items[].judgeTime)',
+  uuid              VARCHAR(100)        COMMENT 'UUID(items[].uuid)',
+  case_no           VARCHAR(200)        COMMENT '案号(items[].caseNo)',
+  case_type         VARCHAR(100)        COMMENT '案件类型(items[].caseType)',
+  case_reason       VARCHAR(500)        COMMENT '案由(items[].caseReason)',
+  case_money        VARCHAR(200)        COMMENT '案件金额(items[].caseMoney)',
+  submit_time       DATETIME            COMMENT '发布日期(items[].submitTime,毫秒时间戳→datetime)',
+  case_result       VARCHAR(200)        COMMENT '案件结果标签(casePersons[0].result)',
+  role1             VARCHAR(100)        COMMENT '案件身份1(casePersons[0].role)',
+  gid1              VARCHAR(200)        COMMENT 'ID1(casePersons[0].gid)',
+  emotion1          INT                 COMMENT '情感倾向1(casePersons[0].emotion: 1=正面,0=中性,-1=负面)',
+  sptname1          VARCHAR(500)        COMMENT '疑似名称1(casePersons[0].sptname)',
+  name1             VARCHAR(500)        COMMENT '名称1(casePersons[0].name)',
+  type1             VARCHAR(50)         COMMENT '类型1(casePersons[0].type: 1=人员,2=公司)',
+  role2             VARCHAR(100)        COMMENT '案件身份2(casePersons[1].role)',
+  gid2              VARCHAR(200)        COMMENT 'ID2(casePersons[1].gid)',
+  emotion2          INT                 COMMENT '情感倾向2(casePersons[1].emotion: 1=正面,0=中性,-1=负面)',
+  sptname2          VARCHAR(500)        COMMENT '疑似名称2(casePersons[1].sptname)',
+  name2             VARCHAR(500)        COMMENT '名称2(casePersons[1].name)',
+  type2             VARCHAR(50)         COMMENT '类型2(casePersons[1].type: 1=人员,2=公司)',
+  INDEX idx_company_name (company_name),
+  INDEX idx_api_record (api_record_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='法律诉讼(1114接口)';

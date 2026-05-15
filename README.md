@@ -16,7 +16,15 @@ PowerLink/
 │   ├── 822-step1_api_fetch.py
 │   ├── 822-step2_data_parse.py
 │   ├── 854-step1_api_fetch.py
-│   └── 854-step2_data_parse.py
+│   ├── 854-step2_data_parse.py
+│   ├── 1168-step1_api_fetch.py
+│   ├── 1168-step2_data_parse.py
+│   ├── 1149-step1_api_fetch.py
+│   ├── 1149-step2_data_parse.py
+│   ├── 967-step1_api_fetch.py
+│   ├── 967-step2_data_parse.py
+│   ├── 1114-step1_api_fetch.py
+│   └── 1114-step2_data_parse.py
 ├── config/                 # 配置文件
 │   └── config.json.example
 ├── tools/                  # 辅助工具
@@ -32,6 +40,10 @@ PowerLink/
 | 1058 | 企业天眼风险 | 1:N | 3层嵌套 | DELETE+INSERT | 搜索入参 |
 | 822 | 变更记录 | 1:N | 2层展平 | DELETE+INSERT | 搜索入参 |
 | 854 | 上市公司企业简介 | 1:1 | 1层+4个Object | ON DUPLICATE KEY UPDATE | 搜索入参 |
+| 1168 | 组织机构 | 1:1 | 2个Array(2级) | ON DUPLICATE KEY UPDATE | 搜索入参 |
+| 1149 | 企业规模 | 1:1 | 简单字符串 | ON DUPLICATE KEY UPDATE | 搜索入参 |
+| 967 | 主要指标-年度 | 1:N | 数组(每年度一行) | DELETE+INSERT | 搜索入参 |
+| 1114 | 法律诉讼 | 1:N | 数组+翻页+casePersons | DELETE+INSERT | 搜索入参 |
 
 ## 共享规则
 
@@ -191,6 +203,90 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 
 ---
 
+## 1168接口 — 组织机构
+
+### [1168-step1_api_fetch.py](etl_script/1168-step1_api_fetch.py)
+
+从天眼查1168接口拉取企业组织机构类型数据。与819/1058/822/854-step1同构。
+
+### [1168-step2_data_parse.py](etl_script/1168-step2_data_parse.py)
+
+1:1关系，解析后写入 `company_1168_org_type_info` 表（7个字段）。
+
+**解析规则（数组→逗号分隔拆列）：**
+
+| API路径 | DB列名 | 说明 |
+|:---------|:-------|:-----|
+| `input_param` | `company_name` | 来自搜索入参 |
+| `result.orgTypes[].level1` | `org_type_level1` | 一级机构类型（逗号分隔） |
+| `result.orgTypes[].level2` | `org_type_level2` | 二级机构类型（逗号分隔） |
+| `result.economyTypes[].level1` | `economy_type_level1` | 一级经济类型（逗号分隔） |
+| `result.economyTypes[].level2` | `economy_type_level2` | 二级经济类型（逗号分隔） |
+
+---
+
+## 1149接口 — 企业规模
+
+### [1149-step1_api_fetch.py](etl_script/1149-step1_api_fetch.py)
+
+从天眼查1149接口拉取企业规模数据。与其他step1同构。
+
+### [1149-step2_data_parse.py](etl_script/1149-step2_data_parse.py)
+
+1:1关系，解析后写入 `company_1149_scale_info` 表（5个字段）。
+
+**解析规则：** `result` 直接为字符串（如"大型"），映射为 `company_scale` 列。
+
+---
+
+## 967接口 — 主要指标-年度
+
+### [967-step1_api_fetch.py](etl_script/967-step1_api_fetch.py)
+
+从天眼查967接口拉取上市公司主要指标数据。与其他step1同构。
+
+### [967-step2_data_parse.py](etl_script/967-step2_data_parse.py)
+
+1:N关系，解析后写入 `company_967_main_index_info` 表（38个字段）。
+
+**解析规则：**
+
+- `result` 为数组，每个年度对象 → 一行记录
+- ~28个DECIMAL(24,4)字段 + `showYear`(VARCHAR)
+- 非上市公司返回error_code=300000，step1记录失败，step2天然跳过
+- DECIMAL字段中0是有效值（如营收为0），不转NULL
+
+---
+
+## 1114接口 — 法律诉讼
+
+### [1114-step1_api_fetch.py](etl_script/1114-step1_api_fetch.py)
+
+从天眼查1114接口拉取企业法律诉讼数据。**支持翻页**（pageNum/pageSize），step1循环拉取所有页并合并存入一条api_call_record。
+
+⚠️ **特别备注**：天眼查最多返回500条记录，合并后存入JSON类型列（可存储约1GB）。保守方案，若未来数据量超限需调整存储策略。
+
+### [1114-step2_data_parse.py](etl_script/1114-step2_data_parse.py)
+
+1:N关系，解析后写入 `company_1114_lawsuit_info` 表（31个字段）。
+
+**解析规则：**
+
+| 数据类型 | 处理方式 | 示例 |
+|:---------|:---------|:-----|
+| 诉讼基本信息 | 14个字段展开 | `docType`→`doc_type`, `caseNo`→`case_no`等 |
+| 涉案方 | 取前2人，各展开6列 | casePersons[0]→`role1/gid1/emotion1/sptname1/name1/type1` |
+| 毫秒时间戳 | ≥1e10÷1000→datetime | `submitTime`: 1628784000000 → 2021-08-12 |
+
+**显式字段映射：**
+
+| API原始key | DB列名 | 原因 |
+|:-----------|:-------|:-----|
+| `id` | `lawsuit_id` | 避免与表主键冲突 |
+| `casePersons[0].result` | `case_result` | 避免与API顶层result混淆 |
+
+---
+
 ## [api_call_record.sql](ddl/api_call_record.sql) — 数据库DDL
 
 在 `powerlink` 库下建表：
@@ -200,6 +296,10 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 - `company_1058_risk_info` — 企业天眼风险表（16个字段）
 - `company_822_change_info` — 变更记录表（10个字段）
 - `company_854_stock_info` — 上市公司企业简介表（36个字段）
+- `company_1168_org_type_info` — 组织机构类型表（7个字段）
+- `company_1149_scale_info` — 企业规模表（5个字段）
+- `company_967_main_index_info` — 主要指标-年度表（38个字段）
+- `company_1114_lawsuit_info` — 法律诉讼表（31个字段）
 
 ---
 
@@ -260,7 +360,23 @@ python3 etl_script/822-step2_data_parse.py
 python3 etl_script/854-step1_api_fetch.py
 python3 etl_script/854-step2_data_parse.py
 
-# 7. 生成数据字典
+# 7. 拉取+解析（1168接口）
+python3 etl_script/1168-step1_api_fetch.py
+python3 etl_script/1168-step2_data_parse.py
+
+# 8. 拉取+解析（1149接口）
+python3 etl_script/1149-step1_api_fetch.py
+python3 etl_script/1149-step2_data_parse.py
+
+# 9. 拉取+解析（967接口）
+python3 etl_script/967-step1_api_fetch.py
+python3 etl_script/967-step2_data_parse.py
+
+# 10. 拉取+解析（1114接口）
+python3 etl_script/1114-step1_api_fetch.py
+python3 etl_script/1114-step2_data_parse.py
+
+# 11. 生成数据字典
 python3 tools/gen_data_dict.py
 ```
 
