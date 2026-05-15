@@ -131,8 +131,8 @@ def has_success_today(keyword: str) -> bool:
         conn.close()
 
 
-def count_today_failures(keyword: str) -> int:
-    """统计当天该公司的失败调用次数"""
+def has_failure_today(keyword: str) -> bool:
+    """检查当天该公司是否已有失败记录（只保留最后一次）"""
     today = datetime.now().strftime('%Y-%m-%d')
     conn = get_db_connection()
     try:
@@ -147,10 +147,10 @@ def count_today_failures(keyword: str) -> int:
             """
             cursor.execute(sql, (INTERFACE_NAME, keyword, today))
             count = cursor.fetchone()[0]
-            return count
+            return count > 0
     except Exception as e:
-        print(f"[WARNING] 统计失败次数失败: {e}")
-        return 0
+        print(f"[WARNING] 检查失败记录失败: {e}")
+        return False
     finally:
         conn.close()
 
@@ -211,36 +211,30 @@ def process_company(keyword: str) -> str:
         print(f"[SKIP] 当天已有成功调用记录，跳过: {keyword}")
         return 'SKIP_SUCCESS'
 
-    # 2. 检查当天失败次数
-    failure_count = count_today_failures(keyword)
-    if failure_count >= MAX_RETRY:
-        print(f"[SKIP] 当天已失败{failure_count}次，事不过三，跳过: {keyword}")
+    # 2. 检查当天是否已有失败记录（只保留1条，存在即表示已穷尽重试）
+    if has_failure_today(keyword):
+        print(f"[SKIP] 当天已有失败记录，事不过三，跳过: {keyword}")
         return 'SKIP_MAX_RETRY'
 
     # 3. 循环尝试，直到成功或达到最大重试次数
-    remaining_attempts = MAX_RETRY - failure_count
-    print(f"[INFO] 当天已尝试{failure_count}次，剩余可尝试{remaining_attempts}次: {keyword}")
-
-    for attempt in range(1, remaining_attempts + 1):
-        print(f"[INFO] 第{failure_count + attempt}次尝试 (本次第{attempt}次): {keyword}")
+    last_error = None
+    for attempt in range(1, MAX_RETRY + 1):
+        print(f"[INFO] 第{attempt}次尝试: {keyword}")
 
         try:
             api_result = call_api(keyword)
             error_code = api_result.get('error_code', -1)
 
             if error_code == 0:
-                # 成功
                 insert_call_record(keyword, status_code=0, output_result=api_result)
                 print(f"[SUCCESS] API调用成功: {keyword}")
                 return 'SUCCESS'
             else:
-                # API业务错误
                 error_msg = api_result.get('reason', '')
                 print(f"[FAILED] API返回错误({error_code}): {error_msg}")
-                insert_call_record(keyword, status_code=error_code, output_result=api_result)
+                last_error = (error_code, api_result)
 
         except requests.RequestException as e:
-            # HTTP请求异常
             error_detail = {
                 'error_type': 'HTTP_EXCEPTION',
                 'error_code': -1,
@@ -248,10 +242,9 @@ def process_company(keyword: str) -> str:
                 'traceback': traceback.format_exc()
             }
             print(f"[EXCEPTION] HTTP请求失败: {e}")
-            insert_call_record(keyword, status_code=-1, output_result=error_detail)
+            last_error = (-1, error_detail)
 
         except Exception as e:
-            # 其他异常
             error_detail = {
                 'error_type': 'OTHER_EXCEPTION',
                 'error_code': -2,
@@ -259,9 +252,11 @@ def process_company(keyword: str) -> str:
                 'traceback': traceback.format_exc()
             }
             print(f"[EXCEPTION] 处理失败: {e}")
-            insert_call_record(keyword, status_code=-2, output_result=error_detail)
+            last_error = (-2, error_detail)
 
-    # 所有尝试都失败了
+    # 所有尝试都失败了 → 只插入最后一次失败的记录
+    if last_error:
+        insert_call_record(keyword, status_code=last_error[0], output_result=last_error[1])
     print(f"[FAILED] 已达最大重试次数({MAX_RETRY})，放弃: {keyword}")
     return 'FAILED'
 
