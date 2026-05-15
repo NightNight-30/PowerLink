@@ -270,6 +270,57 @@ fields5 = [
 
 write_sheet(ws5, overview5, fields5)
 
+# ========== Sheet6: company_854_stock_info ==========
+ws6 = wb.create_sheet('company_854_stock_info')
+
+overview6 = [
+    ('数据库', 'powerlink'), ('表名', 'company_854_stock_info'), ('表描述', '上市公司企业简介(854接口)'),
+    ('引擎', 'InnoDB'), ('字符集', 'utf8mb4'), ('所属系统', '天眼查数据接入'),
+    ('唯一约束', 'company_name'), ('创建日期', '2026-05-15'),
+    ('解析规则说明', '1:1关系, ON DUPLICATE KEY UPDATE; 4个Object字段展开为type/name/id 3列; 非上市公司result为空→跳过; company_name来自搜索入参'),
+]
+
+fields6 = [
+    (1, 'id', '主键ID', 'BIGINT', '', 'Y', 'N', '自增', '内部', '-', '-', '自增主键'),
+    (2, 'api_record_id', 'API调用记录ID', 'BIGINT', '', 'N', 'Y', '', '内部', 'api_call_record.id', '-', '关联api_call_record表'),
+    (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
+    (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'UK', 'N', '', '内部', '-', '-', '来自搜索入参(input_param)，非API返回'),
+    (5, 'area', '区域', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.area', '空字符串→NULL', ''),
+    (6, 'website', '网址', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.website', '空字符串→NULL', ''),
+    (7, 'stock_code', '股票代码', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.code', '字段映射: code→stock_code', '如: 002600'),
+    (8, 'address', '地址', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.address', '空字符串→NULL', ''),
+    (9, 'gm_type', '总经理类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.generalManager.cType', 'Object展开: generalManager→gm_type/gm_name/gm_id', '1=公司, 2=人'),
+    (10, 'gm_name', '总经理姓名', 'VARCHAR', '120', 'N', 'Y', '', '天眼查', 'result.generalManager.name', 'Object展开', ''),
+    (11, 'gm_id', '总经理ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.generalManager.id', 'Object展开; id="0"→NULL', ''),
+    (12, 'stock_company_name', 'API返回公司名', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.companyName', '字段映射: companyName→stock_company_name', '区别于入参company_name'),
+    (13, 'employees_num', '员工人数', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.employeesNum', '驼峰→下划线', '如: 100434'),
+    (14, 'main_business', '主营业务', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.mainBusiness', '驼峰→下划线; 空字符串→NULL', ''),
+    (15, 'mobile', '电话', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.mobile', '空字符串→NULL', '如: 86-0755-25863893'),
+    (16, 'chairman_type', '董事长类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.chairman.cType', 'Object展开: chairman→chairman_type/chairman_name/chairman_id', '1=公司, 2=人'),
+    (17, 'chairman_name', '董事长姓名', 'VARCHAR', '120', 'N', 'Y', '', '天眼查', 'result.chairman.name', 'Object展开', ''),
+    (18, 'chairman_id', '董事长ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.chairman.id', 'Object展开; id="0"→NULL', ''),
+    (19, 'industry', '行业', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.industry', '空字符串→NULL', '如: 电子 — 消费电子'),
+    (20, 'product_name', '产品名称', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.productName', '驼峰→下划线; 空字符串→NULL', ''),
+    (21, 'secretary_type', '董秘类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.secretaries.cType', 'Object展开: secretaries→secretary_type/secretary_name/secretary_id', '1=公司, 2=人'),
+    (22, 'secretary_name', '董秘姓名', 'VARCHAR', '120', 'N', 'Y', '', '天眼查', 'result.secretaries.name', 'Object展开', ''),
+    (23, 'secretary_id', '董秘ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.secretaries.id', 'Object展开; id="0"→NULL', ''),
+    (24, 'actual_controller', '实际控制人', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.actualController', '驼峰→下划线; 空字符串→NULL', ''),
+    (25, 'controlling_shareholder', '控股股东', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.controllingShareholder', '驼峰→下划线; 空字符串→NULL', ''),
+    (26, 'eng_name', '英文名', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.engName', '驼峰→下划线', ''),
+    (27, 'registered_capital', '注册资本', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.registeredCapital', '驼峰→下划线; 空字符串→NULL', '如: 730710.925万人民币'),
+    (28, 'postalcode', '邮编', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.postalcode', '-', '已是下划线命名'),
+    (29, 'legal_person_type', '法人类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.legal.cType', 'Object展开: legal→legal_person_type/legal_person_name/legal_person_id', '1=公司, 2=人'),
+    (30, 'legal_person_name', '法人姓名', 'VARCHAR', '120', 'N', 'Y', '', '天眼查', 'result.legal.name', 'Object展开', ''),
+    (31, 'legal_person_id', '法人ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.legal.id', 'Object展开; id="0"→NULL', ''),
+    (32, 'listed_name', '上市公司简称', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.name', '字段映射: name→listed_name', '区别于company_name(搜索入参)'),
+    (33, 'fax', '传真', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.fax', '空字符串→NULL', ''),
+    (34, 'used_name', '曾用名', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.usedName', '驼峰→下划线; 空字符串→NULL', ''),
+    (35, 'final_controller', '最终控制人', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.finalController', '驼峰→下划线; 空字符串→NULL', ''),
+    (36, 'introduction', '简介', 'TEXT', '', 'N', 'Y', '', '天眼查', 'result.introduction', '空字符串→NULL', ''),
+]
+
+write_sheet(ws6, overview6, fields6)
+
 # ========== 保存 ==========
 output_path = '/Users/wangshuaijia/workspace/tyc/数据字典_powerlink.xlsx'
 wb.save(output_path)

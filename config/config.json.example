@@ -18,6 +18,12 @@
       "token": "<YOUR_TYC_TOKEN>",
       "timeout": 30
     },
+    "854": {
+      "name": "上市公司企业简介",
+      "url": "http://open.api.tianyancha.com/services/open/stock/companyInfo/2.0",
+      "token": "<YOUR_TYC_TOKEN>",
+      "timeout": 30
+    },
     "967": {
       "name": "主要指标-年度",
       "url": "",

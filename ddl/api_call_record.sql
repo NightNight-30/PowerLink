@@ -143,3 +143,47 @@ CREATE TABLE IF NOT EXISTS company_822_change_info (
   INDEX idx_company_name (company_name),
   INDEX idx_api_record (api_record_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='变更记录(822接口)';
+
+-- 6. 上市公司企业简介表 (854接口解析目标)
+-- 解析规则：1:1关系，ON DUPLICATE KEY UPDATE
+-- 4个Object字段展开：generalManager/chairman/secretaries/legal 各→type+name+id
+-- 非上市公司查询成功但result为空 → step2跳过不解析
+CREATE TABLE IF NOT EXISTS company_854_stock_info (
+  id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_record_id           BIGINT              COMMENT 'API调用记录ID(关联api_call_record.id)',
+  data_create_time        DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  company_name            VARCHAR(200) NOT NULL COMMENT '主公司名(搜索关键字/入参)',
+  area                    LONGTEXT            COMMENT '区域(result.area)',
+  website                 LONGTEXT            COMMENT '网址(result.website)',
+  stock_code              VARCHAR(255)        COMMENT '股票代码(result.code)',
+  address                 VARCHAR(255)        COMMENT '地址(result.address)',
+  gm_type                 INT                 COMMENT '总经理类型(result.generalManager.cType: 1=公司,2=人)',
+  gm_name                 VARCHAR(120)        COMMENT '总经理姓名(result.generalManager.name)',
+  gm_id                   BIGINT              COMMENT '总经理ID(result.generalManager.id)',
+  stock_company_name      VARCHAR(255)        COMMENT 'API返回公司名(result.companyName)',
+  employees_num           VARCHAR(255)        COMMENT '员工人数(result.employeesNum)',
+  main_business           LONGTEXT            COMMENT '主营业务(result.mainBusiness)',
+  mobile                  VARCHAR(255)        COMMENT '电话(result.mobile)',
+  chairman_type           INT                 COMMENT '董事长类型(result.chairman.cType: 1=公司,2=人)',
+  chairman_name           VARCHAR(120)        COMMENT '董事长姓名(result.chairman.name)',
+  chairman_id             BIGINT              COMMENT '董事长ID(result.chairman.id)',
+  industry                VARCHAR(255)        COMMENT '行业(result.industry)',
+  product_name            LONGTEXT            COMMENT '产品名称(result.productName)',
+  secretary_type          INT                 COMMENT '董秘类型(result.secretaries.cType: 1=公司,2=人)',
+  secretary_name          VARCHAR(120)        COMMENT '董秘姓名(result.secretaries.name)',
+  secretary_id            BIGINT              COMMENT '董秘ID(result.secretaries.id)',
+  actual_controller       LONGTEXT            COMMENT '实际控制人(result.actualController)',
+  controlling_shareholder LONGTEXT            COMMENT '控股股东(result.controllingShareholder)',
+  eng_name                VARCHAR(255)        COMMENT '英文名(result.engName)',
+  registered_capital      VARCHAR(255)        COMMENT '注册资本(result.registeredCapital)',
+  postalcode              VARCHAR(255)        COMMENT '邮编(result.postalcode)',
+  legal_person_type       INT                 COMMENT '法人类型(result.legal.cType: 1=公司,2=人)',
+  legal_person_name       VARCHAR(120)        COMMENT '法人姓名(result.legal.name)',
+  legal_person_id         BIGINT              COMMENT '法人ID(result.legal.id)',
+  listed_name             VARCHAR(255)        COMMENT '上市公司简称(result.name)',
+  fax                     VARCHAR(255)        COMMENT '传真(result.fax)',
+  used_name               VARCHAR(255)        COMMENT '曾用名(result.usedName)',
+  final_controller        LONGTEXT            COMMENT '最终控制人(result.finalController)',
+  introduction            TEXT                COMMENT '简介(result.introduction)',
+  UNIQUE KEY uk_company_name (company_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上市公司企业简介(854接口)';

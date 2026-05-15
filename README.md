@@ -14,7 +14,9 @@ PowerLink/
 │   ├── 1058-step1_api_fetch.py
 │   ├── 1058-step2_data_parse.py
 │   ├── 822-step1_api_fetch.py
-│   └── 822-step2_data_parse.py
+│   ├── 822-step2_data_parse.py
+│   ├── 854-step1_api_fetch.py
+│   └── 854-step2_data_parse.py
 ├── config/                 # 配置文件
 │   └── config.json.example
 ├── tools/                  # 辅助工具
@@ -29,6 +31,7 @@ PowerLink/
 | 819 | 企业基本信息（含主要人员） | 1:1 | 1层扁平 | ON DUPLICATE KEY UPDATE | API返回 |
 | 1058 | 企业天眼风险 | 1:N | 3层嵌套 | DELETE+INSERT | 搜索入参 |
 | 822 | 变更记录 | 1:N | 2层展平 | DELETE+INSERT | 搜索入参 |
+| 854 | 上市公司企业简介 | 1:1 | 1层+4个Object | ON DUPLICATE KEY UPDATE | 搜索入参 |
 
 ## 共享规则
 
@@ -58,6 +61,7 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 | 关联追溯 | 带出 `api_call_record.id` 写入 `api_record_id`；`data_create_time` 自动记录 |
 | 主公司名来源 | 来自搜索入参 `input_param`，非API返回的name字段 |
 | 空值规范 | 空字符串 `""` 和 `0` → NULL |
+| 空结果跳过 | 部分接口（如854）对非上市公司返回成功但result为空，step2跳过不插入 |
 
 ---
 
@@ -151,6 +155,41 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 
 ---
 
+## 854接口 — 上市公司企业简介
+
+### [854-step1_api_fetch.py](etl_script/854-step1_api_fetch.py)
+
+从天眼查854接口拉取上市公司企业简介数据。与819/822/1058-step1同构。
+
+### [854-step2_data_parse.py](etl_script/854-step2_data_parse.py)
+
+1:1关系，4个Object字段展开后写入 `company_854_stock_info` 表（36个字段）。
+
+**特殊逻辑：** 非上市公司查询成功但result为空 → step2跳过（SKIP_EMPTY），不插入空数据。
+
+**4个Object字段展开规则（每个→type/name/id 3列）：**
+
+| API Object | DB前缀 | 展开列 | 说明 |
+|:-----------|:-------|:-------|:-----|
+| `result.generalManager` | `gm` | `gm_type/gm_name/gm_id` | 总经理 |
+| `result.chairman` | `chairman` | `chairman_type/chairman_name/chairman_id` | 董事长 |
+| `result.secretaries` | `secretary` | `secretary_type/secretary_name/secretary_id` | 董秘 |
+| `result.legal` | `legal_person` | `legal_person_type/legal_person_name/legal_person_id` | 法人 |
+
+- `cType`: 1=公司, 2=人（INT）
+- `id`: 人物ID（BIGINT）；`id="0"` → NULL
+- `name`: 人物姓名（VARCHAR(120)）
+
+**显式字段映射：**
+
+| API原始key | DB列名 | 原因 |
+|:-----------|:-------|:-----|
+| `code` | `stock_code` | 避免与其他code混淆 |
+| `companyName` | `stock_company_name` | 区别于入参company_name |
+| `name` | `listed_name` | 上市公司简称，区别于搜索入参 |
+
+---
+
 ## [api_call_record.sql](ddl/api_call_record.sql) — 数据库DDL
 
 在 `powerlink` 库下建表：
@@ -159,6 +198,7 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 - `customer_info` — 客户公司列表（3个字段）
 - `company_1058_risk_info` — 企业天眼风险表（16个字段）
 - `company_822_change_info` — 变更记录表（10个字段）
+- `company_854_stock_info` — 上市公司企业简介表（36个字段）
 
 ---
 
@@ -213,7 +253,11 @@ python3 etl_script/1058-step2_data_parse.py
 python3 etl_script/822-step1_api_fetch.py
 python3 etl_script/822-step2_data_parse.py
 
-# 6. 生成数据字典
+# 6. 拉取+解析（854接口）
+python3 etl_script/854-step1_api_fetch.py
+python3 etl_script/854-step2_data_parse.py
+
+# 7. 生成数据字典
 python3 tools/gen_data_dict.py
 ```
 
