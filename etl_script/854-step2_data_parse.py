@@ -7,8 +7,11 @@
   1. 从api_call_record读取当天成功记录
   2. 解析result字段，展开Object子字段
   3. 写入company_854_stock_info表
-  4. 非上市公司result为空 → 跳过不解析
-  5. 1:1关系，ON DUPLICATE KEY UPDATE
+  4. 1:1关系，ON DUPLICATE KEY UPDATE
+
+说明：
+  非上市公司API返回error_code=300000(经查无结果)，在step1就记录为失败，
+  step2只解析status_code=0的成功记录，天然跳过非上市公司，无需额外判断
 
 执行方式：
   python3 854-step2_data_parse.py [公司名]
@@ -139,12 +142,9 @@ def extract_person_fields(person_obj: Optional[Dict]) -> Dict:
     return {'type': c_type, 'name': name, 'id': pid}
 
 
-def parse_stock_data(api_result: Dict, keyword: str, record_id: int) -> Optional[Dict]:
-    """解析854接口数据，返回一行记录。result为空则返回None（跳过）"""
+def parse_stock_data(api_result: Dict, keyword: str, record_id: int) -> Dict:
+    """解析854接口数据，返回一行记录"""
     result = api_result.get('result')
-    if not result:
-        print(f"[SKIP] 非上市公司或无数据，跳过: {keyword}")
-        return None
 
     gm = extract_person_fields(result.get('generalManager'))
     chairman = extract_person_fields(result.get('chairman'))
@@ -244,7 +244,7 @@ def main():
             print("[WARNING] 没有获取到成功记录，任务结束")
             return
 
-        stats = {'PARSED': 0, 'SKIP_EMPTY': 0, 'ERROR': 0}
+        stats = {'PARSED': 0, 'ERROR': 0}
 
         for i, record in enumerate(records, 1):
             keyword = record['input_param']
@@ -253,10 +253,6 @@ def main():
 
             try:
                 row = parse_stock_data(record['output_result'], keyword, record['id'])
-                if row is None:
-                    stats['SKIP_EMPTY'] += 1
-                    continue
-
                 insert_stock_info(row)
                 print(f"[SUCCESS] 解析入库: {keyword}")
                 stats['PARSED'] += 1
@@ -270,9 +266,8 @@ def main():
         print("解析完成！")
         print("-" * 60)
         print(f"总计: {len(records)} 条成功记录")
-        print(f"  PARSED:      {stats['PARSED']}")
-        print(f"  SKIP_EMPTY:  {stats['SKIP_EMPTY']}")
-        print(f"  ERROR:       {stats['ERROR']}")
+        print(f"  PARSED: {stats['PARSED']}")
+        print(f"  ERROR:  {stats['ERROR']}")
         print("=" * 60)
 
     except Exception as e:
