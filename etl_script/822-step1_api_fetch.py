@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-【Step1】天眼查822接口 - API数据拉取（含重试机制）
+【Step1】天眼查822接口 - API数据拉取（含翻页+重试机制）
 
 功能：
   1. 从customer_info表获取公司列表
-  2. 调用822API，原始数据存入api_call_record表
+  2. 调用822API（支持翻页），合并所有页数据存入api_call_record表
   3. 幂等检查：当天已有成功记录则跳过
   4. 重试机制：事不过三，失败只保留最新一条记录
 
@@ -24,6 +24,7 @@ from typing import Dict, List, Any, Optional
 
 INTERFACE_KEY = '822'
 MAX_RETRY = 3
+PAGE_SIZE = 20
 
 
 def load_config() -> Dict:
@@ -123,12 +124,13 @@ def delete_today_failure_records(keyword: str):
         conn.close()
 
 
-def call_api(keyword: str) -> Dict[str, Any]:
+def call_api_page(keyword: str, page_num: int) -> Dict[str, Any]:
+    """调用单页API"""
     api_config = get_api_config()
     headers = {'Authorization': CONFIG['providers'][api_config['provider']]['token']}
-    params = {'keyword': keyword}
+    params = {'keyword': keyword, 'pageNum': page_num, 'pageSize': PAGE_SIZE}
 
-    print(f"[INFO] 调用API: {keyword}")
+    print(f"[INFO] 调用API: {keyword} (第{page_num}页)")
     response = requests.get(
         api_config['url'],
         headers=headers,
@@ -138,6 +140,59 @@ def call_api(keyword: str) -> Dict[str, Any]:
     response.raise_for_status()
     result = response.json()
     return result
+
+
+def call_api_all_pages(keyword: str) -> Dict[str, Any]:
+    """
+    循环翻页拉取所有数据，合并为完整响应
+    返回合并后的完整API响应（error_code=0时包含所有items）
+    """
+    # 第1页
+    first_page = call_api_page(keyword, 1)
+    error_code = first_page.get('error_code', -1)
+
+    if error_code != 0:
+        return first_page
+
+    result = first_page.get('result')
+    if not result:
+        return first_page
+
+    total = result.get('total', 0)
+    all_items = result.get('items', [])
+    print(f"[INFO] 总记录数: {total}, 第1页获取: {len(all_items)}条")
+
+    if total <= PAGE_SIZE:
+        return first_page
+
+    # 计算总页数并继续翻页
+    total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
+    print(f"[INFO] 需翻页: 共{total_pages}页")
+
+    for page_num in range(2, total_pages + 1):
+        try:
+            page_result = call_api_page(keyword, page_num)
+            page_error_code = page_result.get('error_code', -1)
+
+            if page_error_code != 0:
+                print(f"[WARNING] 第{page_num}页返回错误({page_error_code}), 停止翻页")
+                break
+
+            page_items = page_result.get('result', {}).get('items', [])
+            all_items.extend(page_items)
+            print(f"[INFO] 第{page_num}页获取: {len(page_items)}条, 累计: {len(all_items)}条")
+
+        except Exception as e:
+            print(f"[WARNING] 第{page_num}页翻页失败: {e}, 停止翻页")
+            break
+
+    # 合并为完整响应
+    merged_result = first_page.copy()
+    merged_result['result'] = {
+        'total': total,
+        'items': all_items
+    }
+    return merged_result
 
 
 def insert_call_record(keyword: str, status_code: int, output_result: Any):
@@ -185,12 +240,14 @@ def process_company(keyword: str) -> str:
         print(f"[INFO] 第{attempt}次尝试: {keyword}")
 
         try:
-            api_result = call_api(keyword)
+            api_result = call_api_all_pages(keyword)
             error_code = api_result.get('error_code', -1)
 
             if error_code == 0:
+                total = api_result.get('result', {}).get('total', 0)
+                items_count = len(api_result.get('result', {}).get('items', []))
                 insert_call_record(keyword, status_code=0, output_result=api_result)
-                print(f"[SUCCESS] API调用成功: {keyword}")
+                print(f"[SUCCESS] API调用成功: {keyword} (total={total}, 实际获取={items_count}条)")
                 return 'SUCCESS'
             else:
                 error_msg = api_result.get('reason', '')
@@ -227,10 +284,11 @@ def process_company(keyword: str) -> str:
 
 def main():
     print("=" * 60)
-    print(f"【Step1】天眼查{INTERFACE_KEY}接口({INTERFACE_NAME}) - API数据拉取")
+    print(f"【Step1】天眼查{INTERFACE_KEY}接口({INTERFACE_NAME}) - API数据拉取(含翻页)")
     print("=" * 60)
     print(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"接口: {INTERFACE_NAME}")
+    print(f"翻页策略: pageSize={PAGE_SIZE}, 循环拉取所有页合并存储")
     print(f"重试策略: 事不过三(最多{MAX_RETRY}次)")
     print()
 
