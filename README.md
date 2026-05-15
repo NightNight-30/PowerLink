@@ -12,7 +12,9 @@ PowerLink/
 │   ├── 819-step1_api_fetch.py
 │   ├── 819-step2_data_parse.py
 │   ├── 1058-step1_api_fetch.py
-│   └── 1058-step2_data_parse.py
+│   ├── 1058-step2_data_parse.py
+│   ├── 822-step1_api_fetch.py
+│   └── 822-step2_data_parse.py
 ├── config/                 # 配置文件
 │   └── config.json.example
 ├── tools/                  # 辅助工具
@@ -20,44 +22,56 @@ PowerLink/
 └── README.md
 ```
 
-## 脚本说明
+## 接口总览
 
-### [819-step1_api_fetch.py](etl_script/819-step1_api_fetch.py) — API数据拉取
+| 接口 | 名称 | 数据关系 | 嵌套层级 | 入库方式 | 主公司名来源 |
+|:-----|:-----|:---------|:---------|:---------|:------------|
+| 819 | 企业基本信息（含主要人员） | 1:1 | 1层扁平 | ON DUPLICATE KEY UPDATE | API返回 |
+| 1058 | 企业天眼风险 | 1:N | 3层嵌套 | DELETE+INSERT | 搜索入参 |
+| 822 | 变更记录 | 1:N | 2层展平 | DELETE+INSERT | 搜索入参 |
 
-从天眼查819接口拉取企业基本信息，原始响应完整存入 `api_call_record` 表。
+## 共享规则
 
-**方法论：**
+所有接口共用以下核心规则：
+
+### Step1：API数据拉取
 
 | 机制 | 说明 |
 |:-----|:-----|
 | 幂等检查 | 查当天 `api_call_record`，已有 `status_code=0` 的成功记录则跳过，不重复调用 |
-| 重试机制 | 事不过三：当天失败记录 <3 次则重试，第3次失败记录最后一次错误信息后放弃 |
-| 原始保存 | API完整响应存入 `output_result` JSON列，失败时存错误详情JSON（error_type/error_code/traceback） |
-| 调用记录 | 每次调用写入 `api_call_record`（interface_name / call_datetime / input_param / status_code / output_result / create_time） |
+| 重试机制 | 事不过三：每次运行都尝试调用（即使当天已有失败记录也继续），最多3次。重试过程不插入DB，最终失败时先删除旧失败记录再插入1条最新错误信息 |
+| interface_name | 使用 `config.json` 中 `apis.{接口号}.name` 的值（如'企业基本信息（含主要人员）'、'变更记录'），而非硬编码接口号 |
+| 原始保存 | API完整响应存入 `output_result` JSON列，失败时存错误详情JSON（error_type/error_code/error_msg/traceback） |
+| 状态码约定 | `status_code=0` 成功；负数=异常（-1 HTTP异常，-2 其他异常）；正数=API业务错误码 |
 
-**执行方式：**
-
+执行方式：
 ```bash
-# 拉取所有公司（从customer_info表读取）
-python3 819-step1_api_fetch.py
-
-# 指定单个公司
-python3 819-step1_api_fetch.py "广东领益智造股份有限公司"
+python3 {接口号}-step1_api_fetch.py          # 拉取所有公司
+python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 ```
+
+### Step2：数据解析
+
+| 机制 | 说明 |
+|:-----|:-----|
+| 去重取最新 | 按 `input_param` 分组，取 `create_time` 最大的一条成功记录 |
+| 关联追溯 | 带出 `api_call_record.id` 写入 `api_record_id`；`data_create_time` 自动记录 |
+| 主公司名来源 | 来自搜索入参 `input_param`，非API返回的name字段 |
+| 空值规范 | 空字符串 `""` 和 `0` → NULL |
 
 ---
 
-### [819-step2_data_parse.py](etl_script/819-step2_data_parse.py) — 数据解析
+## 819接口 — 企业基本信息
 
-从 `api_call_record` 读取当天成功记录，按解析规则拆分后写入 `company_819_info` 表。
+### [819-step1_api_fetch.py](etl_script/819-step1_api_fetch.py)
 
-**方法论：**
+从天眼查819接口拉取企业基本信息，原始响应存入 `api_call_record` 表。
 
-**去重逻辑：** 按公司名+日期分组，取 `create_time` 最近的一条成功记录（SQL子查询 `MAX(create_time)`）
+### [819-step2_data_parse.py](etl_script/819-step2_data_parse.py)
 
-**关联追溯：** 带出 `api_call_record.id` 写入 `api_record_id`，可反向查找原始API调用；`data_create_time` 自动记录解析入库时间
+1:1关系，解析后写入 `company_819_info` 表（65个字段）。
 
-**解析规则（最细粒度拆分，客户使用方便优先）：**
+**解析规则（最细粒度拆分）：**
 
 | 数据类型 | 处理方式 | 示例 |
 |:---------|:---------|:-----|
@@ -67,7 +81,7 @@ python3 819-step1_api_fetch.py "广东领益智造股份有限公司"
 | `Number时间戳` | ≥1e10为毫秒÷1000 → datetime | `173376000000` → `1975-07-01` |
 | `简单字段` | 驼峰→下划线 + 必要映射 | `creditCode`→`social_credit_code`，`BRNNumber`→`brn_number` |
 
-**字段映射（显式重命名，避免歧义）：**
+**显式字段映射：**
 
 | API原始key | DB列名 | 原因 |
 |:-----------|:-------|:-----|
@@ -85,29 +99,70 @@ python3 819-step1_api_fetch.py "广东领益智造股份有限公司"
 | `approvedTime` | `approval_date` | 时间戳→datetime |
 | `updateTimes` | `update_time` | 时间戳→datetime |
 
-**执行方式：**
+---
 
-```bash
-# 解析当天所有成功记录
-python3 819-step2_data_parse.py
+## 1058接口 — 企业天眼风险
 
-# 指定单个公司
-python3 819-step2_data_parse.py "广东领益智造股份有限公司"
-```
+### [1058-step1_api_fetch.py](etl_script/1058-step1_api_fetch.py)
+
+从天眼查1058接口拉取企业天眼风险数据。与819-step1同构。
+
+### [1058-step2_data_parse.py](etl_script/1058-step2_data_parse.py)
+
+1:N关系，3层嵌套展平后写入 `company_1058_risk_info` 表（16个字段）。
+
+**3层展平路径：** `riskList[]` → `list[]` → `list[]`
+
+| API路径 | DB列名 | 说明 |
+|:---------|:-------|:-----|
+| `input_param` | `main_company_name` | 来自搜索入参 |
+| `result.riskLevel` | `risk_level` | 顶层字段 |
+| `riskList[].count` | `risk_category_count` | 风险类别条数 |
+| `riskList[].name` | `risk_category_name` | 自身/周边/历史/预警 |
+| `riskList[].list[].total` | `risk_type_total` | 风险类型条数 |
+| `riskList[].list[].tag` | `risk_type_tag` | 警示/高风险/提示 |
+| `riskList[].list[].list[].id` | `risk_id` | 避免与表主键冲突 |
+| `riskList[].list[].list[].companyId` | `company_id` | 可空 |
+| `riskList[].list[].list[].companyName` | `company_name` | 可空 |
 
 ---
 
-### [api_call_record.sql](ddl/api_call_record.sql) — 数据库DDL
+## 822接口 — 变更记录
+
+### [822-step1_api_fetch.py](etl_script/822-step1_api_fetch.py)
+
+从天眼查822接口拉取企业变更记录数据。与819/1058-step1同构。
+
+### [822-step2_data_parse.py](etl_script/822-step2_data_parse.py)
+
+1:N关系，2层展平后写入 `company_822_change_info` 表（10个字段）。
+
+**2层展平路径：** `result.total` + `result.items[]`
+
+| API路径 | DB列名 | 说明 |
+|:---------|:-------|:-----|
+| `input_param` | `company_name` | 来自搜索入参，非API返回 |
+| `result.total` | `total` | 变更记录总数（meta字段） |
+| `result.items[].changeItem` | `change_item` | 变更项名称 |
+| `result.items[].contentBefore` | `content_before` | 变更前内容(TEXT) |
+| `result.items[].contentAfter` | `content_after` | 变更后内容(TEXT) |
+| `result.items[].changeTime` | `change_time` | 变更时间(VARCHAR) |
+| `result.items[].createTime` | `create_time` | 记录创建时间(VARCHAR) |
+
+---
+
+## [api_call_record.sql](ddl/api_call_record.sql) — 数据库DDL
 
 在 `powerlink` 库下建表：
-- `api_call_record` — 三方接口调用记录表（7个字段）
-- `company_819_info` — 企业基本信息表（65个字段，含industryAll展开8列、staffList拆2列、api_record_id关联）
+- `api_call_record` — 三方接口调用记录表（7个字段，所有接口共用）
+- `company_819_info` — 企业基本信息表（65个字段）
 - `customer_info` — 客户公司列表（3个字段）
-- `company_1058_risk_info` — 企业天眼风险表（16个字段，1:N关系，3层嵌套展平）
+- `company_1058_risk_info` — 企业天眼风险表（16个字段）
+- `company_822_change_info` — 变更记录表（10个字段）
 
 ---
 
-### [config.json.example](config/config.json.example) — 配置模板
+## [config.json.example](config/config.json.example) — 配置模板
 
 使用前复制为 `config.json` 并填入真实值：
 - `apis.*.token` — 天眼查API授权token
@@ -117,64 +172,13 @@ python3 819-step2_data_parse.py "广东领益智造股份有限公司"
 
 ---
 
-### [gen_data_dict.py](tools/gen_data_dict.py) — 数据字典生成工具
+## [gen_data_dict.py](tools/gen_data_dict.py) — 数据字典生成工具
 
 读取DDL和解析规则，生成 `数据字典_powerlink.xlsx`：
 - 每表一个sheet（表概览 + 字段明细）
 - 字段明细12列：序号 / 字段名 / 中文名 / 类型 / 长度 / 主键 / 空值 / 默认值 / 来源 / 原始路径 / 转换规则 / 备注
-- 原始字段路径使用完整嵌套名（如 `result.industryAll.categoryCodeFourth`）
-- 1058表使用3层嵌套路径（如 `result.riskList[].list[].list[].id`）
 
 ---
-
-### [1058-step1_api_fetch.py](etl_script/1058-step1_api_fetch.py) — API数据拉取（1058接口）
-
-从天眼查1058接口拉取企业天眼风险数据，原始响应完整存入 `api_call_record` 表。
-
-与819-step1完全同构，调用规则相同（幂等检查 + 事不过三重试）。
-
-**执行方式：**
-
-```bash
-python3 1058-step1_api_fetch.py
-python3 1058-step1_api_fetch.py "广东领益智造股份有限公司"
-```
-
----
-
-### [1058-step2_data_parse.py](etl_script/1058-step2_data_parse.py) — 数据解析（3层嵌套展平）
-
-从 `api_call_record` 读取当天成功记录，将3层嵌套数据展平后写入 `company_1058_risk_info` 表。
-
-**核心差异（与819对比）：**
-
-| 维度 | 819 | 1058 |
-|:-----|:----|:------|
-| 数据关系 | 1公司→1行 | 1公司→N行 |
-| 嵌套层级 | 1层扁平 | riskList→list→list 3层嵌套 |
-| 入库方式 | ON DUPLICATE KEY UPDATE | DELETE旧数据 + INSERT新数据 |
-| 主公司名来源 | API返回的name | 搜索入参input_param |
-
-**解析规则（纯Python实现json_normalize等效逻辑）：**
-
-| API路径 | DB列名 | 说明 |
-|:---------|:-------|:-----|
-| `input_param` | `main_company_name` | 来自搜索入参，非API返回 |
-| `result.riskLevel` | `risk_level` | 顶层字段 |
-| `riskList[].count` | `risk_category_count` | 风险类别下的条数 |
-| `riskList[].name` | `risk_category_name` | 自身风险/周边风险/历史风险/预警提醒 |
-| `riskList[].list[].total` | `risk_type_total` | 风险类型组下的条数 |
-| `riskList[].list[].tag` | `risk_type_tag` | 警示/高风险/提示信息 |
-| `riskList[].list[].list[].id` | `risk_id` | 重命名避免与表主键冲突 |
-| `riskList[].list[].list[].companyId` | `company_id` | 可空 |
-| `riskList[].list[].list[].companyName` | `company_name` | 可空 |
-
-**执行方式：**
-
-```bash
-python3 1058-step2_data_parse.py
-python3 1058-step2_data_parse.py "广东领益智造股份有限公司"
-```
 
 ## 运行环境
 
@@ -197,19 +201,19 @@ cp config/config.json.example config/config.json
 # 2. 执行DDL建表
 mysql -u root -p powerlink < ddl/api_call_record.sql
 
-# 3. 拉取数据（819接口）
+# 3. 拉取+解析（819接口）
 python3 etl_script/819-step1_api_fetch.py
-
-# 4. 解析数据（819接口）
 python3 etl_script/819-step2_data_parse.py
 
-# 5. 拉取数据（1058接口）
+# 4. 拉取+解析（1058接口）
 python3 etl_script/1058-step1_api_fetch.py
-
-# 6. 解析数据（1058接口）
 python3 etl_script/1058-step2_data_parse.py
 
-# 7. 生成数据字典
+# 5. 拉取+解析（822接口）
+python3 etl_script/822-step1_api_fetch.py
+python3 etl_script/822-step2_data_parse.py
+
+# 6. 生成数据字典
 python3 tools/gen_data_dict.py
 ```
 
@@ -221,4 +225,6 @@ python3 tools/gen_data_dict.py
 | 2 | `historyNames` 分号字符串非合法JSON | 用 `historyNameList` 替代 |
 | 3 | 时间戳阈值 `>1e12` 对12位毫秒值误判 | 改为 `≥1e10` |
 | 4 | 遗漏 aboveScale 等4个字段 | ALTER TABLE + DDL + 脚本同步补齐 |
-| 5 | `BRNNumber` → `b_r_n_number` ❌ | FIELD_MAPPING 显式映射 → `brn_number` ✅ |
+| 5 | `BRNNumber` → `b_r_n_number` | FIELD_MAPPING 显式映射 → `brn_number` |
+| 6 | `id` 字段与表主键冲突 | 显式映射 id→company_id/risk_id 等 |
+| 7 | 失败3次产生3条重复记录，且失败后SKIP阻止重试 | 每次都尝试（不跳过失败），最终失败时delete旧记录+insert最新1条 |
