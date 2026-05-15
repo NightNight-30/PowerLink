@@ -464,6 +464,142 @@ fields10 = [
 
 write_sheet(ws10, overview10, fields10)
 
+# ========== Sheet11: company_973_cash_flow_info ==========
+ws11 = wb.create_sheet('company_973_cash_flow_info')
+
+overview11 = [
+    ('数据库', 'powerlink'), ('表名', 'company_973_cash_flow_info'), ('表描述', '现金流量表(973接口)'),
+    ('引擎', 'InnoDB'), ('字符集', 'utf8mb4'), ('所属系统', '天眼查数据接入'),
+    ('数据关系', '1:N(1公司→N个报告期)'), ('创建日期', '2026-05-15'),
+    ('解析规则说明', 'result.corpCashFlow数组展平,每报告期一行; 37个VARCHAR字段(带单位如"7.92亿"); 不提取corpFinancialYears; API字段名已是snake_case与DB一致; 空字符串→NULL; DELETE旧数据+INSERT新数据'),
+    ('特别备注', '973接口默认返回最近一期数据(如"2026(Q1)"),无需翻页; 非上市公司返回error_code=300000→step2天然跳过'),
+]
+
+fields11 = [
+    (1, 'id', '主键ID', 'BIGINT', '', 'Y', 'N', '自增', '内部', '-', '-', '自增主键'),
+    (2, 'api_record_id', 'API调用记录ID', 'BIGINT', '', 'N', 'Y', '', '内部', 'api_call_record.id', '-', '关联api_call_record表'),
+    (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
+    (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'N', 'N', '', '内部', '-', '-', '来自搜索入参(input_param)，非API返回'),
+    (5, 'show_year', '报告期', 'VARCHAR', '32', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].showYear', '字段映射: showYear→show_year', '如: 2026(Q1), 2025(年报)'),
+    (6, 'ncf_from_oa', '经营活动产生的现金流量净额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].ncf_from_oa', 'API已是snake_case', ''),
+    (7, 'sub_total_of_ci_from_oa', '经营活动现金流入小计', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].sub_total_of_ci_from_oa', 'API已是snake_case', ''),
+    (8, 'sub_total_of_cos_from_oa', '经营活动现金流出小计', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].sub_total_of_cos_from_oa', 'API已是snake_case', ''),
+    (9, 'cash_received_of_sales_service', '销售商品、提供劳务收到的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_received_of_sales_service', 'API已是snake_case', ''),
+    (10, 'payments_of_all_taxes', '支付的各项税费', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].payments_of_all_taxes', 'API已是snake_case', ''),
+    (11, 'cash_paid_to_staff_etc', '支付给职工以及为职工支付的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_paid_to_staff_etc', 'API已是snake_case', ''),
+    (12, 'goods_buy_and_service_cash_pay', '购买商品、接受劳务支付的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].goods_buy_and_service_cash_pay', 'API已是snake_case', ''),
+    (13, 'other_cash_paid_related_to_oa', '支付其他与经营活动有关的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].other_cash_paid_related_to_oa', 'API已是snake_case; 空字符串→NULL', ''),
+    (14, 'cash_received_of_other_fa', '收到其他与经营活动有关的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_received_of_other_fa', 'API已是snake_case(虽名含fa实为经营活动)', 'API命名遗留，实为经营活动'),
+    (15, 'ncf_from_ia', '投资活动产生的现金流量净额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].ncf_from_ia', 'API已是snake_case', ''),
+    (16, 'sub_total_of_ci_from_ia', '投资活动现金流入小计', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].sub_total_of_ci_from_ia', 'API已是snake_case', ''),
+    (17, 'sub_total_of_cos_from_ia', '投资活动现金流出小计', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].sub_total_of_cos_from_ia', 'API已是snake_case', ''),
+    (18, 'cash_received_of_dspsl_invest', '收回投资收到的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_received_of_dspsl_invest', 'API已是snake_case(Dspsl=Disposal缩写)', ''),
+    (19, 'invest_income_cash_received', '取得投资收益收到的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].invest_income_cash_received', 'API已是snake_case', ''),
+    (20, 'net_cash_of_disposal_assets', '处置固定资产等收回的现金净额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].net_cash_of_disposal_assets', 'API已是snake_case', ''),
+    (21, 'net_cash_of_disposal_branch', '处置子公司等收到的现金净额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].net_cash_of_disposal_branch', 'API已是snake_case; 空字符串→NULL', ''),
+    (22, 'cash_received_of_other_ia', '收到其他与投资活动有关的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_received_of_other_ia', 'API已是snake_case', ''),
+    (23, 'invest_paid_cash', '投资支付的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].invest_paid_cash', 'API已是snake_case', ''),
+    (24, 'cash_paid_for_assets', '购建固定资产等支付的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_paid_for_assets', 'API已是snake_case', ''),
+    (25, 'ncf_from_fa', '筹资活动产生的现金流量净额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].ncf_from_fa', 'API已是snake_case', ''),
+    (26, 'sub_total_of_ci_from_fa', '筹资活动现金流入小计', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].sub_total_of_ci_from_fa', 'API已是snake_case', ''),
+    (27, 'sub_total_of_cos_from_fa', '筹资活动现金流出小计', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].sub_total_of_cos_from_fa', 'API已是snake_case', ''),
+    (28, 'cash_received_of_absorb_invest', '吸收投资收到的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_received_of_absorb_invest', 'API已是snake_case', ''),
+    (29, 'cash_received_from_investor', '子公司吸收少数股东投资收到的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_received_from_investor', 'API已是snake_case', ''),
+    (30, 'cash_received_of_borrowing', '取得借款收到的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_received_of_borrowing', 'API已是snake_case', ''),
+    (31, 'cash_received_from_bond_issue', '发行债券收到的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_received_from_bond_issue', 'API已是snake_case; 空字符串→NULL', ''),
+    (32, 'cash_received_of_othr_fa', '收到其他与筹资活动有关的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_received_of_othr_fa', 'API已是snake_case(Othr=Other缩写)', ''),
+    (33, 'cash_pay_for_debt', '偿还债务支付的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_pay_for_debt', 'API已是snake_case', ''),
+    (34, 'cash_paid_of_distribution', '分配股利、利润或偿付利息支付的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].cash_paid_of_distribution', 'API已是snake_case', ''),
+    (35, 'other_cash_paid_relating_to_fa', '支付其他与筹资活动有关的现金', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].other_cash_paid_relating_to_fa', 'API已是snake_case', ''),
+    (36, 'branch_paid_to_minority_holder', '子公司支付给少数股东的股利、利润', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].branch_paid_to_minority_holder', 'API已是snake_case; 空字符串→NULL', ''),
+    (37, 'net_increase_in_cce', '现金及现金等价物净增加额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].net_increase_in_cce', 'API已是snake_case(CCE=CashEquivalents)', ''),
+    (38, 'initial_balance_of_cce', '期初现金及现金等价物余额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].initial_balance_of_cce', 'API已是snake_case', ''),
+    (39, 'final_balance_of_cce', '期末现金及现金等价物余额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].final_balance_of_cce', 'API已是snake_case', ''),
+    (40, 'net_cash_amt_from_branch', '取得子公司等支付的现金净额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].net_cash_amt_from_branch', 'API已是snake_case', ''),
+    (41, 'effect_of_exchange_chg_on_cce', '汇率变动对现金等价物的影响', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.corpCashFlow[].effect_of_exchange_chg_on_cce', 'API已是snake_case', ''),
+]
+
+write_sheet(ws11, overview11, fields11)
+
+# ========== 目录Sheet（插入到最前面） ==========
+
+# 目录数据：序号、表名、中文名、字段数、数据关系、接口号、说明
+dir_data = [
+    ('api_call_record', '三方接口调用记录', 7, '1:N(所有接口共用)', '-', '所有接口的API调用原始记录，通过interface_name区分'),
+    ('company_819_info', '企业基本信息', 65, '1:1', '819', '含主要人员、行业分类、资本、证件编码等'),
+    ('customer_info', '客户公司列表', 3, '-', '-', '数据源，提供搜索关键字'),
+    ('company_1058_risk_info', '企业天眼风险', 16, '1:N', '1058', '3层嵌套展平：风险类别→风险类型→风险条目'),
+    ('company_822_change_info', '变更记录', 10, '1:N', '822', '2层展平：变更总数+每条变更记录'),
+    ('company_854_stock_info', '上市公司企业简介', 36, '1:1', '854', '4个Object人物字段展开+非上市公司天然跳过'),
+    ('company_1168_org_type_info', '组织机构类型', 7, '1:1', '1168', 'orgTypes/economyTypes数组→逗号分隔拆列'),
+    ('company_1149_scale_info', '企业规模', 5, '1:1', '1149', 'result直接为字符串(如"大型")'),
+    ('company_967_main_index_info', '主要指标-年度', 38, '1:N', '967', '~28个DECIMAL字段，每年度一行'),
+    ('company_1114_lawsuit_info', '法律诉讼', 31, '1:N', '1114', '翻页合并+casePersons前2人展开'),
+    ('company_973_cash_flow_info', '现金流量表', 41, '1:N', '973', '37个VARCHAR字段+showYear，API默认返回最近一期'),
+]
+
+ws_dir = wb.create_sheet('目录', 0)  # 插入到位置0（最前面）
+
+# 标题
+ws_dir.merge_cells('A1:G1')
+ws_dir['A1'] = 'PowerLink 数据字典目录'
+ws_dir['A1'].font = Font(name='微软雅黑', bold=True, size=16, color='1F4E79')
+
+# 表头
+dir_headers = ['序号', '表名(点击跳转)', '中文描述', '字段数', '数据关系', '接口号', '说明']
+dir_col_widths = [6, 30, 16, 8, 18, 8, 40]
+
+header_row = 3
+for col_idx, h in enumerate(dir_headers, 1):
+    cell = ws_dir.cell(row=header_row, column=col_idx)
+    cell.value = h
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = center_align
+    cell.border = thin_border
+
+# 数据行（带超链接）
+for row_idx, (table_name, chinese, field_count, relation, api_num, desc) in enumerate(dir_data):
+    r = header_row + 1 + row_idx
+    ws_dir.cell(row=r, column=1, value=row_idx + 1).font = normal_font
+    ws_dir.cell(row=r, column=1).alignment = center_align
+    ws_dir.cell(row=r, column=1).border = thin_border
+
+    # 表名+超链接
+    link_cell = ws_dir.cell(row=r, column=2, value=table_name)
+    link_cell.font = Font(name='微软雅黑', size=10, color='2E75B6', underline='single')
+    link_cell.alignment = left_align
+    link_cell.border = thin_border
+    link_cell.hyperlink = f"#{table_name}!A1"
+
+    ws_dir.cell(row=r, column=3, value=chinese).font = normal_font
+    ws_dir.cell(row=r, column=3).alignment = center_align
+    ws_dir.cell(row=r, column=3).border = thin_border
+
+    ws_dir.cell(row=r, column=4, value=field_count).font = normal_font
+    ws_dir.cell(row=r, column=4).alignment = center_align
+    ws_dir.cell(row=r, column=4).border = thin_border
+
+    ws_dir.cell(row=r, column=5, value=relation).font = normal_font
+    ws_dir.cell(row=r, column=5).alignment = center_align
+    ws_dir.cell(row=r, column=5).border = thin_border
+
+    ws_dir.cell(row=r, column=6, value=api_num).font = normal_font
+    ws_dir.cell(row=r, column=6).alignment = center_align
+    ws_dir.cell(row=r, column=6).border = thin_border
+
+    ws_dir.cell(row=r, column=7, value=desc).font = normal_font
+    ws_dir.cell(row=r, column=7).alignment = left_align
+    ws_dir.cell(row=r, column=7).border = thin_border
+
+    if row_idx % 2 == 1:
+        for col in range(1, 8):
+            ws_dir.cell(row=r, column=col).fill = alt_fill
+
+# 列宽
+for i, w in enumerate(dir_col_widths, 1):
+    ws_dir.column_dimensions[get_column_letter(i)].width = w
+
 # ========== 保存 ==========
 output_path = '/Users/wangshuaijia/workspace/tyc/数据字典_powerlink.xlsx'
 wb.save(output_path)

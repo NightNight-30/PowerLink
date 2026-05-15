@@ -24,7 +24,9 @@ PowerLink/
 │   ├── 967-step1_api_fetch.py
 │   ├── 967-step2_data_parse.py
 │   ├── 1114-step1_api_fetch.py
-│   └── 1114-step2_data_parse.py
+│   ├── 1114-step2_data_parse.py
+│   ├── 973-step1_api_fetch.py
+│   └── 973-step2_data_parse.py
 ├── config/                 # 配置文件
 │   └── config.json.example
 ├── tools/                  # 辅助工具
@@ -44,6 +46,7 @@ PowerLink/
 | 1149 | 企业规模 | 1:1 | 简单字符串 | ON DUPLICATE KEY UPDATE | 搜索入参 |
 | 967 | 主要指标-年度 | 1:N | 数组(每年度一行) | DELETE+INSERT | 搜索入参 |
 | 1114 | 法律诉讼 | 1:N | 数组+翻页+casePersons | DELETE+INSERT | 搜索入参 |
+| 973 | 现金流量表 | 1:N | 数组(每报告期一行) | DELETE+INSERT | 搜索入参 |
 
 ## 共享规则
 
@@ -287,6 +290,28 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 
 ---
 
+## 973接口 — 现金流量表
+
+### [973-step1_api_fetch.py](etl_script/973-step1_api_fetch.py)
+
+从天眼查973接口拉取上市公司现金流量表数据。与其他step1同构。API默认返回最近一期数据（如"2026(Q1)"），无需翻页。
+
+**特别备注：** 非上市公司返回error_code=300000，step1记录失败，step2天然跳过。
+
+### [973-step2_data_parse.py](etl_script/973-step2_data_parse.py)
+
+1:N关系，解析后写入 `company_973_cash_flow_info` 表（41个字段）。
+
+**解析规则：**
+
+- `result.corpCashFlow` 数组展平，每个报告期 → 一行记录
+- 37个VARCHAR字段（带单位的字符串如"7.92亿"、"6143.66万"）
+- 不提取 `corpFinancialYears`（其信息已在 `showYear` 体现）
+- API返回的字段名已是snake_case，与DB列名一致，仅 `showYear→show_year` 需映射
+- 空字符串 → NULL
+
+---
+
 ## [api_call_record.sql](ddl/api_call_record.sql) — 数据库DDL
 
 在 `powerlink` 库下建表：
@@ -300,6 +325,7 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 - `company_1149_scale_info` — 企业规模表（5个字段）
 - `company_967_main_index_info` — 主要指标-年度表（38个字段）
 - `company_1114_lawsuit_info` — 法律诉讼表（31个字段）
+- `company_973_cash_flow_info` — 现金流量表（41个字段）
 
 ---
 
@@ -375,6 +401,10 @@ python3 etl_script/967-step2_data_parse.py
 # 10. 拉取+解析（1114接口）
 python3 etl_script/1114-step1_api_fetch.py
 python3 etl_script/1114-step2_data_parse.py
+
+# 11. 拉取+解析（973接口）
+python3 etl_script/973-step1_api_fetch.py
+python3 etl_script/973-step2_data_parse.py
 
 # 11. 生成数据字典
 python3 tools/gen_data_dict.py

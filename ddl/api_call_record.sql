@@ -305,3 +305,55 @@ CREATE TABLE IF NOT EXISTS company_1114_lawsuit_info (
   INDEX idx_company_name (company_name),
   INDEX idx_api_record (api_record_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='法律诉讼(1114接口)';
+
+-- 11. 现金流量表 (973接口解析目标)
+-- 解析规则：1:N关系，每报告期一行，DELETE+INSERT
+-- 只提取result.corpCashFlow下的所有字段，不提取corpFinancialYears
+-- 所有字段为VARCHAR(带单位的字符串如"1.78 亿")
+-- showYear表示报告期(如"2018 年报"、"2018 一季度")
+-- 非上市公司返回error_code=300000，step1记录失败，step2天然跳过
+CREATE TABLE IF NOT EXISTS company_973_cash_flow_info (
+  id                          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_record_id               BIGINT              COMMENT 'API调用记录ID(关联api_call_record.id)',
+  data_create_time            DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  company_name                VARCHAR(200) NOT NULL COMMENT '主公司名(搜索关键字/入参)',
+  show_year                   VARCHAR(32)          COMMENT '报告期(result.corpCashFlow[].showYear)',
+  ncf_from_oa                 VARCHAR(200)         COMMENT '经营活动产生的现金流量净额',
+  sub_total_of_ci_from_oa     VARCHAR(200)         COMMENT '经营活动现金流入小计',
+  sub_total_of_cos_from_oa    VARCHAR(200)         COMMENT '经营活动现金流出小计',
+  cash_received_of_sales_service VARCHAR(200)      COMMENT '销售商品、提供劳务收到的现金',
+  payments_of_all_taxes       VARCHAR(200)         COMMENT '支付的各项税费',
+  cash_paid_to_staff_etc      VARCHAR(200)         COMMENT '支付给职工以及为职工支付的现金',
+  goods_buy_and_service_cash_pay VARCHAR(200)      COMMENT '购买商品、接受劳务支付的现金',
+  other_cash_paid_related_to_oa VARCHAR(200)       COMMENT '支付其他与经营活动有关的现金',
+  cash_received_of_other_fa   VARCHAR(200)         COMMENT '收到其他与经营活动有关的现金',
+  ncf_from_ia                 VARCHAR(200)         COMMENT '投资活动产生的现金流量净额',
+  sub_total_of_ci_from_ia     VARCHAR(200)         COMMENT '投资活动现金流入小计',
+  sub_total_of_cos_from_ia    VARCHAR(200)         COMMENT '投资活动现金流出小计',
+  cash_received_of_dspsl_invest VARCHAR(200)       COMMENT '收回投资收到的现金',
+  invest_income_cash_received VARCHAR(200)         COMMENT '取得投资收益收到的现金',
+  net_cash_of_disposal_assets VARCHAR(200)         COMMENT '处置固定资产、无形资产和其他长期资产收回的现金净额',
+  net_cash_of_disposal_branch VARCHAR(200)         COMMENT '处置子公司及其他营业单位收到的现金净额',
+  cash_received_of_other_ia   VARCHAR(200)         COMMENT '收到其他与投资活动有关的现金',
+  invest_paid_cash            VARCHAR(200)         COMMENT '投资支付的现金',
+  cash_paid_for_assets        VARCHAR(200)         COMMENT '购建固定资产、无形资产和其他长期资产支付的现金',
+  ncf_from_fa                 VARCHAR(200)         COMMENT '筹资活动产生的现金流量净额',
+  sub_total_of_ci_from_fa     VARCHAR(200)         COMMENT '筹资活动现金流入小计',
+  sub_total_of_cos_from_fa    VARCHAR(200)         COMMENT '筹资活动现金流出小计',
+  cash_received_of_absorb_invest VARCHAR(200)      COMMENT '吸收投资收到的现金',
+  cash_received_from_investor VARCHAR(200)         COMMENT '子公司吸收少数股东投资收到的现金',
+  cash_received_of_borrowing  VARCHAR(200)         COMMENT '取得借款收到的现金',
+  cash_received_from_bond_issue VARCHAR(200)       COMMENT '发行债券收到的现金',
+  cash_received_of_othr_fa    VARCHAR(200)         COMMENT '收到其他与筹资活动有关的现金',
+  cash_pay_for_debt           VARCHAR(200)         COMMENT '偿还债务支付的现金',
+  cash_paid_of_distribution   VARCHAR(200)         COMMENT '分配股利、利润或偿付利息支付的现金',
+  other_cash_paid_relating_to_fa VARCHAR(200)      COMMENT '支付其他与筹资活动有关的现金',
+  branch_paid_to_minority_holder VARCHAR(200)      COMMENT '子公司支付给少数股东的股利、利润',
+  net_increase_in_cce         VARCHAR(200)         COMMENT '现金及现金等价物净增加额',
+  initial_balance_of_cce     VARCHAR(200)         COMMENT '期初现金及现金等价物余额',
+  final_balance_of_cce        VARCHAR(200)         COMMENT '期末现金及现金等价物余额',
+  net_cash_amt_from_branch    VARCHAR(200)         COMMENT '取得子公司及其他营业单位支付的现金净额',
+  effect_of_exchange_chg_on_cce VARCHAR(200)      COMMENT '汇率变动对现金及现金等价物的影响',
+  INDEX idx_company_name (company_name),
+  INDEX idx_api_record (api_record_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='现金流量表(973接口)';
