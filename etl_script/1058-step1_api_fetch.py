@@ -7,7 +7,7 @@
   1. 从customer_info表获取公司列表
   2. 调用1058API，原始数据存入api_call_record表
   3. 幂等检查：当天已有成功记录则跳过
-  4. 重试机制：当天失败记录不足3次则重试，事不过三
+  4. 重试机制：事不过三，失败只保留最新一条记录
 
 执行方式：
   python3 1058-step1_api_fetch.py [公司名]
@@ -104,26 +104,24 @@ def has_success_today(keyword: str) -> bool:
         conn.close()
 
 
-def has_failure_today(keyword: str) -> bool:
-    """检查当天该公司是否已有失败记录（只保留最后一次）"""
+def delete_today_failure_records(keyword: str):
+    """删除当天该公司在当前接口的所有失败记录（用于只保留最新一条）"""
     today = datetime.now().strftime('%Y-%m-%d')
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
             sql = """
-            SELECT COUNT(*)
-            FROM api_call_record
+            DELETE FROM api_call_record
             WHERE interface_name = %s
               AND input_param = %s
               AND DATE(call_datetime) = %s
               AND status_code != 0
             """
             cursor.execute(sql, (INTERFACE_NAME, keyword, today))
-            count = cursor.fetchone()[0]
-            return count > 0
+            conn.commit()
     except Exception as e:
-        print(f"[WARNING] 检查失败记录失败: {e}")
-        return False
+        print(f"[WARNING] 删除旧失败记录失败: {e}")
+        conn.rollback()
     finally:
         conn.close()
 
@@ -177,19 +175,16 @@ def insert_call_record(keyword: str, status_code: int, output_result: Any):
 def process_company(keyword: str) -> str:
     """
     处理单个公司的API拉取（含重试逻辑）
-    返回: 'SUCCESS' / 'FAILED' / 'SKIP_SUCCESS' / 'SKIP_MAX_RETRY'
+    成功：立即插入SUCCESS记录
+    失败：重试3次，只保留最新一条失败记录（删旧+插新）
+    返回: 'SUCCESS' / 'FAILED' / 'SKIP_SUCCESS'
     """
-    # 1. 检查当天是否已有成功记录
+    # 1. 检查当天是否已有成功记录 → 幂等跳过
     if has_success_today(keyword):
         print(f"[SKIP] 当天已有成功调用记录，跳过: {keyword}")
         return 'SKIP_SUCCESS'
 
-    # 2. 检查当天是否已有失败记录（只保留1条，存在即表示已穷尽重试）
-    if has_failure_today(keyword):
-        print(f"[SKIP] 当天已有失败记录，事不过三，跳过: {keyword}")
-        return 'SKIP_MAX_RETRY'
-
-    # 3. 循环尝试，直到成功或达到最大重试次数
+    # 2. 没有成功记录则尝试（即使有失败记录也继续尝试）
     last_error = None
     for attempt in range(1, MAX_RETRY + 1):
         print(f"[INFO] 第{attempt}次尝试: {keyword}")
@@ -227,7 +222,8 @@ def process_company(keyword: str) -> str:
             print(f"[EXCEPTION] 处理失败: {e}")
             last_error = (-2, error_detail)
 
-    # 所有尝试都失败了 → 只插入最后一次失败的记录
+    # 所有尝试都失败了 → 删除旧的失败记录，只保留最新1条
+    delete_today_failure_records(keyword)
     if last_error:
         insert_call_record(keyword, status_code=last_error[0], output_result=last_error[1])
     print(f"[FAILED] 已达最大重试次数({MAX_RETRY})，放弃: {keyword}")
@@ -254,7 +250,7 @@ def main():
             print("[WARNING] 没有获取到公司列表，任务结束")
             return
 
-        stats = {'SUCCESS': 0, 'FAILED': 0, 'SKIP_SUCCESS': 0, 'SKIP_MAX_RETRY': 0}
+        stats = {'SUCCESS': 0, 'FAILED': 0, 'SKIP_SUCCESS': 0}
 
         for i, company in enumerate(companies, 1):
             print(f"\n[{i}/{len(companies)}] {company}")
@@ -270,7 +266,6 @@ def main():
         print(f"  SUCCESS:      {stats['SUCCESS']}")
         print(f"  FAILED:       {stats['FAILED']}")
         print(f"  SKIP_SUCCESS: {stats['SKIP_SUCCESS']}")
-        print(f"  SKIP_RETRY:   {stats['SKIP_MAX_RETRY']}")
         print("=" * 60)
         print(f"\n下一步: 执行 1058-step2_data_parse.py 解析数据")
 
