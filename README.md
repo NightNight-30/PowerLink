@@ -27,6 +27,8 @@ PowerLink/
 │   ├── 1114-step2_data_parse.py
 │   ├── 973-step1_api_fetch.py
 │   └── 973-step2_data_parse.py
+│   ├── P51060-step1_api_fetch.py
+│   └── P51060-step2_data_parse.py
 ├── config/                 # 配置文件
 │   └── config.json.example
 ├── tools/                  # 辅助工具
@@ -47,6 +49,7 @@ PowerLink/
 | 967 | 主要指标-年度 | 1:N | 数组(每年度一行) | DELETE+INSERT | 搜索入参 |
 | 1114 | 法律诉讼 | 1:N | 数组+翻页+casePersons | DELETE+INSERT | 搜索入参 |
 | 973 | 现金流量表 | 1:N | 数组(每报告期一行) | DELETE+INSERT | 搜索入参 |
+| P51060 | 付款指数（PAYDEX®） | 1:1 | res JSON字符串 | ON DUPLICATE KEY UPDATE | 搜索入参(entityName) |
 
 ## 共享规则
 
@@ -312,6 +315,53 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 
 ---
 
+## P51060接口 — 付款指数（PAYDEX®）
+
+### [P51060-step1_api_fetch.py](etl_script/P51060-step1_api_fetch.py)
+
+从邓白氏P51060接口拉取企业付款指数数据。**与天眼查接口差异较大：**
+
+| 差异点 | 天眼查 | 邓白氏 |
+|:-------|:-------|:-------|
+| 请求方式 | GET | POST |
+| 认证方式 | Authorization header (token) | SHA256(client_key + client_secret + sku_no + body + timestamp) |
+| 搜索参数 | keyword (公司名) | entityName (公司名) + uscc (统一社会信用代码，从819表查取) |
+| 响应格式 | {error_code, result, reason} | {code, res(JSON字符串), msg, trace} |
+| 成功判断 | error_code=0 | code=0 |
+| 无结果 | error_code=300000 | code=1 |
+
+其他规则与天眼查一致：幂等检查、事不过三、原始保存。
+
+### [P51060-step2_data_parse.py](etl_script/P51060-step2_data_parse.py)
+
+1:1关系，解析后写入 `company_P51060_paydex_info` 表（21个字段）。
+
+**解析规则：**
+
+- `res` 为JSON字符串，需 `json.loads()` 二次解析
+- `companyHistoryPayDexes` (List) → JSON字符串存储
+- 字段名 camelCase → snake_case（显式FIELD_MAPPING映射）
+- 空字符串 → NULL
+- `company_name` 来自搜索入参（entityName），非API返回
+
+**显式字段映射：**
+
+| API原始key | DB列名 | 原因 |
+|:-----------|:-------|:-----|
+| `companyPayDex` | `company_paydex` | 驼峰→下划线 |
+| `companyPayDexDate` | `company_paydex_date` | 驼峰→下划线 |
+| `companyHistoryPayDexes` | `company_history_paydexes` | List→JSON字符串 |
+| `encompanyAverage` | `en_company_average` | en前缀+驼峰→下划线 |
+| `enindustryAverage` | `en_industry_average` | en前缀+驼峰→下划线 |
+| `industryPayDexDate` | `industry_paydex_date` | 驼峰→下划线 |
+| `industryLowerQuartilePayDex` | `industry_lower_quartile_paydex` | 驼峰→下划线 |
+| `industryMedianPayDex` | `industry_median_paydex` | 驼峰→下划线 |
+| `industryUpperQuartilePayDex` | `industry_upper_quartile_paydex` | 驼峰→下划线 |
+| `industryCountNum` | `industry_count_num` | 驼峰→下划线 |
+| `industryCompanyPosition` | `industry_company_position` | 驼峰→下划线 |
+
+---
+
 ## [api_call_record.sql](ddl/api_call_record.sql) — 数据库DDL
 
 在 `powerlink` 库下建表：
@@ -326,6 +376,7 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 - `company_967_main_index_info` — 主要指标-年度表（38个字段）
 - `company_1114_lawsuit_info` — 法律诉讼表（31个字段）
 - `company_973_cash_flow_info` — 现金流量表（41个字段）
+- `company_P51060_paydex_info` — 付款指数（21个字段）
 
 ---
 
@@ -334,7 +385,8 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 使用前复制为 `config.json` 并填入真实值：
 - `apis.*.token` — 已移除，改用 `providers` 统一管理
 - `providers.tyc.token` — 天眼查API授权token
-- `providers.dnb.token` — 邓白氏API授权token
+- `providers.dnb.client_key` — 邓白氏API client_key（Base64编码）
+- `providers.dnb.client_secret` — 邓白氏API client_secret（Base64编码）
 - `mysql.user / mysql.password` — MySQL账号密码
 
 **注意：** `config.json` 包含敏感信息，已在 `.gitignore` 中排除，不会提交到仓库。
@@ -406,7 +458,11 @@ python3 etl_script/1114-step2_data_parse.py
 python3 etl_script/973-step1_api_fetch.py
 python3 etl_script/973-step2_data_parse.py
 
-# 11. 生成数据字典
+# 12. 拉取+解析（P51060接口-邓白氏）
+python3 etl_script/P51060-step1_api_fetch.py
+python3 etl_script/P51060-step2_data_parse.py
+
+# 13. 生成数据字典
 python3 tools/gen_data_dict.py
 ```
 

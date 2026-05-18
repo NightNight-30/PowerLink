@@ -1,7 +1,7 @@
 {
   "providers": {
     "tyc": { "token": "<YOUR_TYC_TOKEN>" },
-    "dnb": { "token": "<YOUR_DNB_TOKEN>" }
+    "dnb": { "client_key": "<YOUR_DNB_CLIENT_KEY_BASE64>", "client_secret": "<YOUR_DNB_CLIENT_SECRET_BASE64>" }
   },
   "apis": {
     "819": {
@@ -57,6 +57,14 @@
       "url": "http://open.api.tianyancha.com/services/open/stock/cashFlow/2.0",
       "provider": "tyc",
       "timeout": 30
+    },
+    "P51060": {
+      "name": "付款指数（PAYDEX®）",
+      "url": "https://openapi.dnb.com.cn/v1/api/callDNBInterface",
+      "provider": "dnb",
+      "timeout": 30,
+      "sku_no": "OPSP-109244-21",
+      "api_id": "P51060"
     }
   },
   "mysql": {
