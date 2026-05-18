@@ -702,6 +702,9 @@ overview_enum = [
     ('数据来源', '天眼查9个接口+邓白氏1个接口的API文档PDF'), ('确定性说明', '明确=文档中有完整值定义; 推断=文档仅有示例或业务常识推断,非完整枚举'),
 ]
 
+enum_headers = ['序号', '枚举名称', '适用接口', '适用DB列', '枚举值', '值含义', '确定性', '来源']
+enum_col_widths = [6, 22, 14, 35, 10, 25, 8, 40]
+
 # 枚举数据：每行(序号, 枚举名称, 适用接口, 适用DB列, 枚举值, 值含义, 确定性, 来源)
 enum_fields = [
     # --- ENUM_LEGAL_PERSON_TYPE (819 法人类型) ---
@@ -824,7 +827,74 @@ enum_fields = [
     (101, 'ENUM_PAYDEX_SCORE', 'P51060(邓白氏)', '', '80', '按期及时付款', '推断', ''),
 ]
 
-write_sheet(ws_enum, overview_enum, enum_fields)
+# --- 枚举字典专属渲染 ---
+start_overview_row = 2
+ws_enum[f'A{start_overview_row - 1}'] = '← 返回目录'
+ws_enum[f'A{start_overview_row - 1}'].font = Font(name='微软雅黑', bold=True, size=10, color='2E75B6', underline='single')
+ws_enum[f'A{start_overview_row - 1}'].hyperlink = Hyperlink(ref=f'A{start_overview_row - 1}', location=f'目录!A1', display='← 返回目录')
+
+# 概览区
+overview_fill = PatternFill(start_color='D6E4F0', end_color='D6E4F0', fill_type='solid')
+last_enum_col = get_column_letter(len(enum_headers))
+ws_enum.merge_cells(f'A{start_overview_row}:{last_enum_col}{start_overview_row}')
+ws_enum[f'A{start_overview_row}'] = '枚举字典概览'
+ws_enum[f'A{start_overview_row}'].font = title_font
+ws_enum[f'A{start_overview_row}'].alignment = left_align
+ws_enum[f'A{start_overview_row}'].fill = overview_fill
+ws_enum[f'A{start_overview_row}'].border = thin_border
+
+for i, (k, v) in enumerate(overview_enum):
+    r = start_overview_row + 1 + i
+    key_cell = ws_enum[f'A{r}']
+    key_cell.value = k
+    key_cell.font = Font(name='微软雅黑', bold=True, size=10, color='1F4E79')
+    key_cell.alignment = left_align
+    key_cell.border = thin_border
+    key_cell.fill = overview_fill
+    val_cell = ws_enum[f'B{r}']
+    val_cell.value = v
+    val_cell.font = normal_font
+    val_cell.alignment = left_align
+    val_cell.border = thin_border
+    ws_enum.merge_cells(f'B{r}:{last_enum_col}{r}')
+
+# 字段区标题
+start_fields_row = start_overview_row + 1 + len(overview_enum) + 1
+ws_enum.merge_cells(f'A{start_fields_row}:{last_enum_col}{start_fields_row}')
+ws_enum[f'A{start_fields_row}'] = '枚举值明细'
+ws_enum[f'A{start_fields_row}'].font = section_font
+ws_enum[f'A{start_fields_row}'].alignment = left_align
+ws_enum[f'A{start_fields_row}'].fill = PatternFill(start_color='D6E4F0', end_color='D6E4F0', fill_type='solid')
+ws_enum[f'A{start_fields_row}'].border = thin_border
+
+# 表头
+header_row = start_fields_row + 1
+for col_idx, h in enumerate(enum_headers, 1):
+    cell = ws_enum.cell(row=header_row, column=col_idx)
+    cell.value = h
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = center_align
+    cell.border = thin_border
+
+# 数据行
+for row_idx, field in enumerate(enum_fields):
+    r = header_row + 1 + row_idx
+    for col_idx, val in enumerate(field, 1):
+        cell = ws_enum.cell(row=r, column=col_idx)
+        cell.value = val
+        cell.font = normal_font
+        cell.alignment = left_align if col_idx > 3 else center_align
+        cell.border = thin_border
+        if row_idx % 2 == 1:
+            cell.fill = alt_fill
+
+# 列宽
+for i, w in enumerate(enum_col_widths, 1):
+    ws_enum.column_dimensions[get_column_letter(i)].width = w
+
+# 冻结窗格
+ws_enum.freeze_panes = f'A{header_row + 1}'
 
 
 # ========== 保存 ==========
