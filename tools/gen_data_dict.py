@@ -111,7 +111,7 @@ fields1 = [
     (2, 'interface_name', '接口名', 'VARCHAR', '32', 'N', 'N', '', '内部', '-', '-', '标识819/967/971/973等接口'),
     (3, 'call_datetime', '调用日期时间', 'DATETIME', '', 'N', 'N', '', '内部', '-', '-', 'API调用发生的时间'),
     (4, 'input_param', '入参(公司名)', 'VARCHAR', '200', 'N', 'N', '', '内部', '-', '-', '搜索关键字/公司名'),
-    (5, 'status_code', '状态码', 'INT', '', 'N', 'N', '', '天眼查', 'result.error_code', '-', '0=成功，负数=异常，正数=业务错误码'),
+    (5, 'status_code', '状态码', 'INT', '', 'N', 'N', '', '天眼查/邓白氏', 'result.error_code / code', '[枚举:ENUM_DNB_STATUS_CODE]对邓白氏接口', '0=成功,负数=异常,正数=业务错误码; 邓白氏code=1004等见枚举字典'),
     (6, 'output_result', '出参结果', 'JSON', '', 'N', 'Y', '', '天眼查', 'response body', '原始JSON完整存储', '成功时为API完整响应JSON，失败时为错误详情JSON'),
     (7, 'create_time', '创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '记录入库时间'),
 ]
@@ -137,17 +137,17 @@ fields2 = [
     (5, 'company_id', '企业ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.id', '-', '天眼查企业唯一ID'),
 
     # 法人/类型
-    (6, 'legal_person_type', '法人类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.type', '-', '1=自然人，2=公司'),
-    (7, 'reg_status', '经营状态', 'VARCHAR', '31', 'N', 'Y', '', '天眼查', 'result.regStatus', '-', '如:存续、注销、吊销等'),
+    (6, 'legal_person_type', '法人类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.type', '-', '1=自然人，2=公司 [枚举:ENUM_LEGAL_PERSON_TYPE]'),
+    (7, 'reg_status', '经营状态', 'VARCHAR', '31', 'N', 'Y', '', '天眼查', 'result.regStatus', '[枚举:ENUM_REG_STATUS(推断)]', '如:存续/注销/吊销等'),
     (8, 'legal_person_name', '法定代表人', 'VARCHAR', '120', 'N', 'Y', '', '天眼查', 'result.legalPersonName', '-', ''),
     (9, 'company_org_type', '企业类型', 'VARCHAR', '127', 'N', 'Y', '', '天眼查', 'result.companyOrgType', '-', '如:其他股份有限公司(上市)'),
-    (10, 'is_micro_ent', '是否小微企业', 'INT', '', 'N', 'Y', '', '天眼查', 'result.isMicroEnt', '-', '0=否，1=是'),
+    (10, 'is_micro_ent', '是否小微企业', 'INT', '', 'N', 'Y', '', '天眼查', 'result.isMicroEnt', '[枚举:ENUM_IS_MICRO_ENT]', '0=否,1=是'),
 
     # 资本
     (11, 'reg_capital', '注册资本(含单位)', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.regCapital', '-', '如:730710.9252万人民币'),
-    (12, 'reg_capital_currency', '注册资本币种', 'VARCHAR', '10', 'N', 'Y', '', '天眼查', 'result.regCapitalCurrency', '-', '人民币/美元/欧元等'),
+    (12, 'reg_capital_currency', '注册资本币种', 'VARCHAR', '10', 'N', 'Y', '', '天眼查', 'result.regCapitalCurrency', '-', '人民币/美元/欧元等 [枚举:ENUM_CURRENCY(推断)]'),
     (13, 'paid_capital', '实缴资本(含单位)', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.actualCapital', '字段映射: actualCapital→paid_capital', '如:183130.690104万人民币'),
-    (14, 'paid_capital_currency', '实缴资本币种', 'VARCHAR', '10', 'N', 'Y', '', '天眼查', 'result.actualCapitalCurrency', '字段映射: actualCapitalCurrency→paid_capital_currency', '人民币/美元/欧元等'),
+    (14, 'paid_capital_currency', '实缴资本币种', 'VARCHAR', '10', 'N', 'Y', '', '天眼查', 'result.actualCapitalCurrency', '字段映射: actualCapitalCurrency→paid_capital', '人民币/美元/欧元等 [枚举:ENUM_CURRENCY(推断)]'),
 
     # 时间(时间戳→datetime)
     (15, 'est_date', '成立日期', 'DATETIME', '', 'N', 'Y', '', '天眼查', 'result.estiblishTime', '时间戳→datetime: ≥1e10为毫秒÷1000', '字段映射: estiblishTime→est_date'),
@@ -261,10 +261,10 @@ fields4 = [
     (6, 'risk_category_count', '风险类别下的条数', 'INT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].count', '3层嵌套展平meta字段', '该风险类别下的风险条数'),
     (7, 'risk_category_name', '风险类别名', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.riskList[].name', '3层嵌套展平meta字段', '自身风险/周边风险/历史风险/预警提醒'),
     (8, 'risk_type_total', '风险类型下的条数', 'INT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].total', '3层嵌套展平meta字段', '该风险类型组下的条数'),
-    (9, 'risk_type_tag', '风险标签', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].tag', '3层嵌套展平meta字段', '警示/高风险/提示信息'),
+    (9, 'risk_type_tag', '风险标签', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].tag', '[枚举:ENUM_RISK_TAG]', '高风险/警示/提示信息'),
     (10, 'company_id', '涉及公司ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].companyId', '-', '可空，风险涉及的公司ID'),
     (11, 'company_name', '涉及公司名', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].companyName', '空字符串→NULL', '可空，风险涉及的公司名'),
-    (12, 'risk_id', '风险条目ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].id', '字段映射: id→risk_id', '避免与表主键冲突'),
+    (15, 'risk_type', '风险类型码', 'INT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].type', '[枚举:ENUM_RISK_TYPE]', '约50个值,见枚举字典'),
     (13, 'risk_count', '风险数量', 'INT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].riskCount', '-', ''),
     (14, 'risk_title', '风险描述', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].title', '-', '风险详情描述'),
     (15, 'risk_type', '风险类型码', 'INT', '', 'N', 'Y', '', '天眼查', 'result.riskList[].list[].list[].type', '-', '风险类型编码'),
@@ -317,19 +317,19 @@ fields6 = [
     (6, 'website', '网址', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.website', '空字符串→NULL', ''),
     (7, 'stock_code', '股票代码', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.code', '字段映射: code→stock_code', '如: 002600'),
     (8, 'address', '地址', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.address', '空字符串→NULL', ''),
-    (9, 'gm_type', '总经理类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.generalManager.cType', 'Object展开: generalManager→gm_type/gm_name/gm_id', '1=公司, 2=人'),
+    (9, 'gm_type', '总经理类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.generalManager.cType', 'Object展开: generalManager→gm_type/gm_name/gm_id; [枚举:ENUM_SUBJECT_TYPE]', '1=公司,2=人'),
     (10, 'gm_name', '总经理姓名', 'VARCHAR', '120', 'N', 'Y', '', '天眼查', 'result.generalManager.name', 'Object展开', ''),
     (11, 'gm_id', '总经理ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.generalManager.id', 'Object展开; id="0"→NULL', ''),
     (12, 'stock_company_name', 'API返回公司名', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.companyName', '字段映射: companyName→stock_company_name', '区别于入参company_name'),
     (13, 'employees_num', '员工人数', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.employeesNum', '驼峰→下划线', '如: 100434'),
     (14, 'main_business', '主营业务', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.mainBusiness', '驼峰→下划线; 空字符串→NULL', ''),
     (15, 'mobile', '电话', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.mobile', '空字符串→NULL', '如: 86-0755-25863893'),
-    (16, 'chairman_type', '董事长类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.chairman.cType', 'Object展开: chairman→chairman_type/chairman_name/chairman_id', '1=公司, 2=人'),
+    (16, 'chairman_type', '董事长类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.chairman.cType', 'Object展开; [枚举:ENUM_SUBJECT_TYPE]', '1=公司,2=人'),
     (17, 'chairman_name', '董事长姓名', 'VARCHAR', '120', 'N', 'Y', '', '天眼查', 'result.chairman.name', 'Object展开', ''),
     (18, 'chairman_id', '董事长ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.chairman.id', 'Object展开; id="0"→NULL', ''),
     (19, 'industry', '行业', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.industry', '空字符串→NULL', '如: 电子 — 消费电子'),
     (20, 'product_name', '产品名称', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.productName', '驼峰→下划线; 空字符串→NULL', ''),
-    (21, 'secretary_type', '董秘类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.secretaries.cType', 'Object展开: secretaries→secretary_type/secretary_name/secretary_id', '1=公司, 2=人'),
+    (21, 'secretary_type', '董秘类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.secretaries.cType', 'Object展开; [枚举:ENUM_SUBJECT_TYPE]', '1=公司,2=人'),
     (22, 'secretary_name', '董秘姓名', 'VARCHAR', '120', 'N', 'Y', '', '天眼查', 'result.secretaries.name', 'Object展开', ''),
     (23, 'secretary_id', '董秘ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.secretaries.id', 'Object展开; id="0"→NULL', ''),
     (24, 'actual_controller', '实际控制人', 'LONGTEXT', '', 'N', 'Y', '', '天眼查', 'result.actualController', '驼峰→下划线; 空字符串→NULL', ''),
@@ -337,7 +337,7 @@ fields6 = [
     (26, 'eng_name', '英文名', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.engName', '驼峰→下划线', ''),
     (27, 'registered_capital', '注册资本', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.registeredCapital', '驼峰→下划线; 空字符串→NULL', '如: 730710.925万人民币'),
     (28, 'postalcode', '邮编', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.postalcode', '-', '已是下划线命名'),
-    (29, 'legal_person_type', '法人类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.legal.cType', 'Object展开: legal→legal_person_type/legal_person_name/legal_person_id', '1=公司, 2=人'),
+    (29, 'legal_person_type', '法人类型', 'INT', '', 'N', 'Y', '', '天眼查', 'result.legal.cType', 'Object展开; [枚举:ENUM_SUBJECT_TYPE]', '1=公司,2=人'),
     (30, 'legal_person_name', '法人姓名', 'VARCHAR', '120', 'N', 'Y', '', '天眼查', 'result.legal.name', 'Object展开', ''),
     (31, 'legal_person_id', '法人ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.legal.id', 'Object展开; id="0"→NULL', ''),
     (32, 'listed_name', '上市公司简称', 'VARCHAR', '255', 'N', 'Y', '', '天眼查', 'result.name', '字段映射: name→listed_name', '区别于company_name(搜索入参)'),
@@ -387,7 +387,7 @@ fields8 = [
     (2, 'api_record_id', 'API调用记录ID', 'BIGINT', '', 'N', 'Y', '', '内部', 'api_call_record.id', '-', '关联api_call_record表'),
     (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
     (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'UK', 'N', '', '内部', '-', '-', '来自搜索入参(input_param)，非API返回'),
-    (5, 'company_scale', '企业规模', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result', 'result直接为字符串', '如: 大型/中型/小型'),
+    (5, 'company_scale', '企业规模', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result', 'result直接为字符串; [枚举:ENUM_COMPANY_SCALE(推断)]', '如:大型/中型/小型/微型'),
 ]
 
 write_sheet(ws8, overview8, fields8)
@@ -463,7 +463,7 @@ fields10 = [
     (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'N', 'N', '', '内部', '-', '-', '来自搜索入参(input_param)，非API返回'),
     (5, 'total', '诉讼记录总数', 'INT', '', 'N', 'Y', '', '天眼查', 'result.total', 'meta字段', '天眼查最多返回500条'),
     (6, 'lawsuit_id', '诉讼条目ID', 'BIGINT', '', 'N', 'Y', '', '天眼查', 'result.items[].id', '字段映射: id→lawsuit_id', '避免与表主键冲突'),
-    (7, 'doc_type', '文书类型', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].docType', '驼峰→下划线', '如: 裁定书/判决书'),
+    (7, 'doc_type', '文书类型', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].docType', '驼峰→下划线; [枚举:ENUM_DOC_TYPE(推断)]', '如:判决书/裁定书/调解书等'),
     (8, 'lawsuit_url', '天眼查URL-Web', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].lawsuitUrl', '驼峰→下划线', ''),
     (9, 'lawsuit_h5_url', '天眼查URL-H5', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].lawsuitH5Url', '驼峰→下划线', ''),
     (10, 'title', '案件名称', 'VARCHAR', '1000', 'N', 'Y', '', '天眼查', 'result.items[].title', '-', ''),
@@ -471,23 +471,23 @@ fields10 = [
     (12, 'judge_time', '裁判日期', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.items[].judgeTime', '驼峰→下划线', '日期字符串'),
     (13, 'uuid', 'UUID', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].uuid', '-', ''),
     (14, 'case_no', '案号', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].caseNo', '驼峰→下划线', '如: (2021)京0108民初44534号'),
-    (15, 'case_type', '案件类型', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].caseType', '驼峰→下划线', '如: 民事案件'),
+    (15, 'case_type', '案件类型', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].caseType', '驼峰→下划线; [枚举:ENUM_CASE_TYPE(推断)]', '如:民事案件/执行案件等'),
     (16, 'case_reason', '案由', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].caseReason', '驼峰→下划线', '如: 网络侵权责任纠纷'),
     (17, 'case_money', '案件金额', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].caseMoney', '驼峰→下划线; 空字符串→NULL', ''),
     (18, 'submit_time', '发布日期', 'DATETIME', '', 'N', 'Y', '', '天眼查', 'result.items[].submitTime', '毫秒时间戳→datetime(≥1e10÷1000)', ''),
-    (19, 'case_result', '案件结果标签', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].result', '字段映射: casePersons[0].result→case_result', '避免与API顶层result混淆'),
-    (20, 'role1', '案件身份1', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].role', 'casePersons取前2人展开', '如: 原告/被告/申请人'),
+    (19, 'case_result', '案件结果标签', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].result', '字段映射; [枚举:ENUM_CASE_RESULT(推断)]', '如:胜诉/败诉/撤诉等'),
+    (20, 'role1', '案件身份1', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].role', 'casePersons展开; [枚举:ENUM_CASE_ROLE(推断)]', '如:原告/被告/上诉人等'),
     (21, 'gid1', 'ID1', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].gid', 'casePersons展开', '空字符串→NULL'),
-    (22, 'emotion1', '情感倾向1', 'INT', '', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].emotion', 'casePersons展开', '1=正面, 0=中性, -1=负面'),
+    (22, 'emotion1', '情感倾向1', 'INT', '', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].emotion', 'casePersons展开; [枚举:ENUM_EMOTION]', '1=正面,0=中性,-1=负面'),
     (23, 'sptname1', '疑似名称1', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].sptname', 'casePersons展开; 空字符串→NULL', ''),
     (24, 'name1', '名称1', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].name', 'casePersons展开', ''),
-    (25, 'type1', '类型1', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].type', 'casePersons展开', '1=人员, 2=公司'),
-    (26, 'role2', '案件身份2', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].role', 'casePersons取前2人展开', '如: 被告/被申请人/被上诉人'),
+    (25, 'type1', '类型1', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[0].type', 'casePersons展开; [枚举:ENUM_SUBJECT_TYPE]', '1=公司,2=人'),
+    (26, 'role2', '案件身份2', 'VARCHAR', '100', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].role', 'casePersons展开; [枚举:ENUM_CASE_ROLE(推断)]', '如:被告/被上诉人等'),
     (27, 'gid2', 'ID2', 'VARCHAR', '200', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].gid', 'casePersons展开', '空字符串→NULL'),
-    (28, 'emotion2', '情感倾向2', 'INT', '', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].emotion', 'casePersons展开', '1=正面, 0=中性, -1=负面'),
+    (28, 'emotion2', '情感倾向2', 'INT', '', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].emotion', 'casePersons展开; [枚举:ENUM_EMOTION]', '1=正面,0=中性,-1=负面'),
     (29, 'sptname2', '疑似名称2', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].sptname', 'casePersons展开; 空字符串→NULL', ''),
     (30, 'name2', '名称2', 'VARCHAR', '500', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].name', 'casePersons展开', ''),
-    (31, 'type2', '类型2', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].type', 'casePersons展开', '1=人员, 2=公司'),
+    (31, 'type2', '类型2', 'VARCHAR', '50', 'N', 'Y', '', '天眼查', 'result.items[].casePersons[1].type', 'casePersons展开; [枚举:ENUM_SUBJECT_TYPE]', '1=人员, 2=公司'),
 ]
 
 write_sheet(ws10, overview10, fields10)
@@ -566,7 +566,7 @@ fields12 = [
     (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
     (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'UK', 'N', '', '内部', '-', '-', '来自搜索入参(entityName)，非API返回'),
     (5, 'uscc', '统一社会信用代码', 'VARCHAR', '50', 'N', 'Y', '', '邓白氏', 'res.uscc', '空字符串→NULL', 'API返回的统一社会信用代码'),
-    (6, 'company_paydex', 'PayDex评分数值(最新)', 'VARCHAR', '50', 'N', 'Y', '', '邓白氏', 'res.companyPayDex', '驼峰→下划线', '企业付款行为评分'),
+    (6, 'company_paydex', 'PayDex评分数值(最新)', 'VARCHAR', '50', 'N', 'Y', '', '邓白氏', 'res.companyPayDex', '驼峰→下划线; [枚举:ENUM_PAYDEX_SCORE(推断)]', '0-100评分,80=按时,50-69=逾期'),
     (7, 'company_paydex_date', 'PayDex评分日期(最新)', 'VARCHAR', '20', 'N', 'Y', '', '邓白氏', 'res.companyPayDexDate', '驼峰→下划线; 空字符串→NULL', '如: 2025-0509'),
     (8, 'company_history_paydexes', 'PayDex历史信息', 'TEXT', '', 'N', 'Y', '', '邓白氏', 'res.companyHistoryPayDexes', 'List→JSON字符串存储', 'JSON数组，含历史评分变化'),
     (9, 'sic2', 'SIC前2位', 'VARCHAR', '20', 'N', 'Y', '', '邓白氏', 'res.sic2', '空字符串→NULL', '标准行业分类代码前2位'),
@@ -601,6 +601,7 @@ desired_order = [
     'company_967_main_index_info', # 967
     'company_973_cash_flow_info',  # 973
     'company_P51060_paydex_info',  # P51060(邓白氏)
+    '枚举字典',                  # 枚举字典
 ]
 # 按desired_order重排wb._sheets
 sheet_map = {ws.title: ws for ws in wb.worksheets}
@@ -623,6 +624,7 @@ dir_data = [
     ('company_967_main_index_info', '主要指标-年度', 38, '1:N', '967', '~28个DECIMAL字段，每年度一行'),
     ('company_973_cash_flow_info', '现金流量表', 41, '1:N', '973', '37个VARCHAR字段+showYear，API默认返回最近一期'),
     ('company_P51060_paydex_info', '付款指数', 21, '1:1', 'P51060', '邓白氏PAYDEX评分+行业基准+历史评分(JSON); POST+SHA256签名认证'),
+    ('枚举字典', '枚举值定义', '-', '-', '-', '所有接口的枚举/固定值字段定义汇总'),
 ]
 
 ws_dir = wb.create_sheet('目录', 0)  # 插入到位置0（最前面）
@@ -690,6 +692,140 @@ for row_idx, (table_name, chinese, field_count, relation, api_num, desc) in enum
 # 列宽
 for i, w in enumerate(dir_col_widths, 1):
     ws_dir.column_dimensions[get_column_letter(i)].width = w
+
+
+# ========== Sheet13: 枚举字典 ==========
+ws_enum = wb.create_sheet('枚举字典')
+
+overview_enum = [
+    ('数据库', 'powerlink'), ('表名', '-(虚拟表)'), ('表描述', '所有接口的枚举值/固定值定义汇总'),
+    ('数据来源', '天眼查9个接口+邓白氏1个接口的API文档PDF'), ('确定性说明', '明确=文档中有完整值定义; 推断=文档仅有示例或业务常识推断,非完整枚举'),
+]
+
+# 枚举数据：每行(序号, 枚举名称, 适用接口, 适用DB列, 枚举值, 值含义, 确定性, 来源)
+enum_fields = [
+    # --- ENUM_LEGAL_PERSON_TYPE (819 法人类型) ---
+    (1, 'ENUM_LEGAL_PERSON_TYPE', '819', 'legal_person_type', '1', '自然人', '明确', '819接口文档'),
+    (2, 'ENUM_LEGAL_PERSON_TYPE', '819', 'legal_person_type', '2', '公司', '明确', '819接口文档'),
+    # --- ENUM_SUBJECT_TYPE (854/1114 主体类型) ---
+    (3, 'ENUM_SUBJECT_TYPE', '854/1114', 'gm_type,chairman_type,secretary_type,legal_person_type(854); type1,type2(1114)', '1', '公司', '明确', '854/1114接口文档'),
+    (4, 'ENUM_SUBJECT_TYPE', '854/1114', '', '2', '人', '明确', '854/1114接口文档'),
+    # --- ENUM_IS_MICRO_ENT (819 是否小微企业) ---
+    (5, 'ENUM_IS_MICRO_ENT', '819', 'is_micro_ent', '0', '否', '明确', '819接口文档'),
+    (6, 'ENUM_IS_MICRO_ENT', '819', 'is_micro_ent', '1', '是', '明确', '819接口文档'),
+    # --- ENUM_RISK_CATEGORY (1058 风险分类) ---
+    (7, 'ENUM_RISK_CATEGORY', '1058', 'risk_category_name(间接)', '0', '预警提醒', '明确', '1058接口文档'),
+    (8, 'ENUM_RISK_CATEGORY', '1058', '', '1', '自身风险', '明确', '1058接口文档'),
+    (9, 'ENUM_RISK_CATEGORY', '1058', '', '2', '周边风险', '明确', '1058接口文档'),
+    (10, 'ENUM_RISK_CATEGORY', '1058', '', '3', '历史风险', '明确', '1058接口文档'),
+    # --- ENUM_RISK_TAG (1058 风险标签) ---
+    (11, 'ENUM_RISK_TAG', '1058', 'risk_type_tag', '高风险', '高风险', '明确', '1058接口文档'),
+    (12, 'ENUM_RISK_TAG', '1058', 'risk_type_tag', '警示', '警示', '明确', '1058接口文档'),
+    (13, 'ENUM_RISK_TAG', '1058', 'risk_type_tag', '提示信息', '提示信息', '明确', '1058接口文档'),
+    # --- ENUM_RISK_TYPE (1058 风险类型码,约50个值) ---
+    (14, 'ENUM_RISK_TYPE', '1058', 'risk_type', '1', '严重违法_企业', '明确', '1058接口文档'),
+    (15, 'ENUM_RISK_TYPE', '1058', '', '3', '失信被执行人_企业', '明确', ''),
+    (16, 'ENUM_RISK_TYPE', '1058', '', '5', '被执行人_企业', '明确', ''),
+    (17, 'ENUM_RISK_TYPE', '1058', '', '6', '行政处罚_企业', '明确', ''),
+    (18, 'ENUM_RISK_TYPE', '1058', '', '7', '经营异常_企业', '明确', ''),
+    (19, 'ENUM_RISK_TYPE', '1058', '', '8', '裁判文书_企业', '明确', ''),
+    (20, 'ENUM_RISK_TYPE', '1058', '', '9', '股权出质_企业', '明确', ''),
+    (21, 'ENUM_RISK_TYPE', '1058', '', '10', '动产抵押_企业', '明确', ''),
+    (22, 'ENUM_RISK_TYPE', '1058', '', '11', '欠税公告_企业', '明确', ''),
+    (23, 'ENUM_RISK_TYPE', '1058', '', '12', '名称变更_企业', '明确', ''),
+    (24, 'ENUM_RISK_TYPE', '1058', '', '13', '开庭公告_企业', '明确', ''),
+    (25, 'ENUM_RISK_TYPE', '1058', '', '14', '法院公告_企业', '明确', ''),
+    (26, 'ENUM_RISK_TYPE', '1058', '', '15', '法人变更_企业', '明确', ''),
+    (27, 'ENUM_RISK_TYPE', '1058', '', '16', '投资人变更_企业', '明确', ''),
+    (28, 'ENUM_RISK_TYPE', '1058', '', '17', '主要人员变更_企业', '明确', ''),
+    (29, 'ENUM_RISK_TYPE', '1058', '', '18', '注册资本变更_企业', '明确', ''),
+    (30, 'ENUM_RISK_TYPE', '1058', '', '19', '注册地址变更_企业', '明确', ''),
+    (31, 'ENUM_RISK_TYPE', '1058', '', '20', '出资情况变更_企业', '明确', ''),
+    (32, 'ENUM_RISK_TYPE', '1058', '', '21', '股权冻结_企业', '明确', ''),
+    (33, 'ENUM_RISK_TYPE', '1058', '', '22', '清算信息_企业', '明确', ''),
+    (34, 'ENUM_RISK_TYPE', '1058', '', '24', '环保处罚_企业', '明确', ''),
+    (35, 'ENUM_RISK_TYPE', '1058', '', '28', '税收违法_企业', '明确', ''),
+    (36, 'ENUM_RISK_TYPE', '1058', '', '32', '限制消费令_企业', '明确', ''),
+    (37, 'ENUM_RISK_TYPE', '1058', '', '34', '终本案件_企业', '明确', ''),
+    (38, 'ENUM_RISK_TYPE', '1058', '', '38', '破产案件_企业', '明确', ''),
+    (39, 'ENUM_RISK_TYPE', '1058', '', '40', '抽查检查_企业', '明确', ''),
+    (40, 'ENUM_RISK_TYPE', '1058', '', '64', '食品安全_企业', '明确', ''),
+    (41, 'ENUM_RISK_TYPE', '1058', '', '99', '破产案件_企业(历史)', '明确', ''),
+    (42, 'ENUM_RISK_TYPE', '1058', '', '100', '减资公告_企业', '明确', ''),
+    (43, 'ENUM_RISK_TYPE', '1058', '(完整列表约50个值)', '', '1~104部分值见1058接口文档附录', '明确', '1058接口文档(完整枚举约50个值)'),
+    # --- ENUM_EMOTION (1114 情感倾向) ---
+    (44, 'ENUM_EMOTION', '1114', 'emotion1,emotion2', '1', '正面', '明确', '1114接口文档'),
+    (45, 'ENUM_EMOTION', '1114', '', '0', '中性', '明确', '1114接口文档'),
+    (46, 'ENUM_EMOTION', '1114', '', '-1', '负面', '明确', '1114接口文档'),
+    # --- ENUM_DNB_STATUS_CODE (P51060 邓白氏响应码) ---
+    (47, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', 'api_call_record.status_code', '0', '有效请求-成功', '明确', 'P51060接口文档附录'),
+    (48, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1', '有效请求-请求无结果', '明确', ''),
+    (49, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1000', '无效请求-请求参数错误', '明确', ''),
+    (50, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1001', '无效请求-认证参数错误', '明确', ''),
+    (51, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1002', '无效请求-签名验证错误', '明确', ''),
+    (52, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1003', '无效请求-客户IP错误(IP白名单)', '明确', ''),
+    (53, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1004', '无效请求-账号不可用', '明确', ''),
+    (54, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1005', '无效请求-账号已过期', '明确', ''),
+    (55, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1006', '无效请求-账户余额不足', '明确', ''),
+    (56, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1007', '无效请求-访问频繁触发限流', '明确', ''),
+    (57, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1008', '无效请求-接口用量已达日上限', '明确', ''),
+    (58, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1009', '无效请求-产品服务不可用', '明确', ''),
+    (59, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1010', '无效请求-产品服务已过期', '明确', ''),
+    (60, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1011', '无效请求-产品服务已使用完毕', '明确', ''),
+    (61, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1012', '无效请求-产品服务未生效', '明确', ''),
+    (62, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '1014', '无效请求-业务逻辑问题', '明确', ''),
+    (63, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '2001', '无效请求-处理失败', '明确', ''),
+    (64, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '2002', '无效请求-系统错误', '明确', ''),
+    (65, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '2003', '无效请求-请求超时', '明确', ''),
+    (66, 'ENUM_DNB_STATUS_CODE', 'P51060(邓白氏)', '', '2004', '无效请求-配置错误', '明确', ''),
+    # --- 推断枚举 ---
+    # --- ENUM_REG_STATUS (819 经营状态,推断) ---
+    (67, 'ENUM_REG_STATUS', '819', 'reg_status', '存续', '存续(在营)', '推断', '819接口示例+业务常识'),
+    (68, 'ENUM_REG_STATUS', '819', '', '注销', '注销', '推断', ''),
+    (69, 'ENUM_REG_STATUS', '819', '', '吊销', '吊销', '推断', ''),
+    (70, 'ENUM_REG_STATUS', '819', '', '迁出', '迁出', '推断', ''),
+    (71, 'ENUM_REG_STATUS', '819', '', '停业', '停业', '推断', ''),
+    # --- ENUM_COMPANY_SCALE (1149 企业规模,推断) ---
+    (72, 'ENUM_COMPANY_SCALE', '1149', 'company_scale', '大型', '大型企业', '推断', '1149接口示例+业务常识'),
+    (73, 'ENUM_COMPANY_SCALE', '1149', '', '中型', '中型企业', '推断', ''),
+    (74, 'ENUM_COMPANY_SCALE', '1149', '', '小型', '小型企业', '推断', ''),
+    (75, 'ENUM_COMPANY_SCALE', '1149', '', '微型', '微型企业', '推断', ''),
+    # --- ENUM_CURRENCY (819 币种,推断) ---
+    (76, 'ENUM_CURRENCY', '819', 'reg_capital_currency,paid_capital_currency', '人民币', '人民币', '推断', '819接口文档标注"人民币 美元 欧元 等"'),
+    (77, 'ENUM_CURRENCY', '819', '', '美元', '美元', '推断', ''),
+    (78, 'ENUM_CURRENCY', '819', '', '欧元', '欧元', '推断', ''),
+    # --- ENUM_DOC_TYPE (1114 文书类型,推断) ---
+    (79, 'ENUM_DOC_TYPE', '1114', 'doc_type', '判决书', '判决书', '推断', '1114接口示例+业务常识'),
+    (80, 'ENUM_DOC_TYPE', '1114', '', '裁定书', '裁定书', '推断', ''),
+    (81, 'ENUM_DOC_TYPE', '1114', '', '调解书', '调解书', '推断', ''),
+    (82, 'ENUM_DOC_TYPE', '1114', '', '决定书', '决定书', '推断', ''),
+    # --- ENUM_CASE_TYPE (1114 案件类型,推断) ---
+    (83, 'ENUM_CASE_TYPE', '1114', 'case_type', '民事案件', '民事案件', '推断', '1114接口示例+业务常识'),
+    (84, 'ENUM_CASE_TYPE', '1114', '', '执行案件', '执行案件', '推断', ''),
+    (85, 'ENUM_CASE_TYPE', '1114', '', '管辖案件', '管辖案件', '推断', ''),
+    (86, 'ENUM_CASE_TYPE', '1114', '', '刑事案件', '刑事案件', '推断', ''),
+    # --- ENUM_CASE_ROLE (1114 案件身份,推断) ---
+    (87, 'ENUM_CASE_ROLE', '1114', 'role1,role2', '原告', '原告', '推断', '1114接口示例+业务常识'),
+    (88, 'ENUM_CASE_ROLE', '1114', '', '被告', '被告', '推断', ''),
+    (89, 'ENUM_CASE_ROLE', '1114', '', '上诉人', '上诉人', '推断', ''),
+    (90, 'ENUM_CASE_ROLE', '1114', '', '被上诉人', '被上诉人', '推断', ''),
+    (91, 'ENUM_CASE_ROLE', '1114', '', '申请执行人', '申请执行人', '推断', ''),
+    (92, 'ENUM_CASE_ROLE', '1114', '', '被执行人', '被执行人', '推断', ''),
+    # --- ENUM_CASE_RESULT (1114 案件结果,推断) ---
+    (93, 'ENUM_CASE_RESULT', '1114', 'case_result', '胜诉', '胜诉', '推断', '1114接口示例+业务常识'),
+    (94, 'ENUM_CASE_RESULT', '1114', '', '败诉', '败诉', '推断', ''),
+    (95, 'ENUM_CASE_RESULT', '1114', '', '撤诉', '撤诉', '推断', ''),
+    (96, 'ENUM_CASE_RESULT', '1114', '', '部分支持', '部分支持', '推断', ''),
+    (97, 'ENUM_CASE_RESULT', '1114', '', '驳回', '驳回', '推断', ''),
+    # --- ENUM_PAYDEX_SCORE (P51060 PAYDEX评分语义,推断) ---
+    (98, 'ENUM_PAYDEX_SCORE', 'P51060(邓白氏)', 'company_paydex', '0-49', '严重逾期', '推断', 'PAYDEX业务常识(PDF无明确阈值定义)'),
+    (99, 'ENUM_PAYDEX_SCORE', 'P51060(邓白氏)', '', '50-69', '明显逾期', '推断', ''),
+    (100, 'ENUM_PAYDEX_SCORE', 'P51060(邓白氏)', '', '70-79', '稍慢', '推断', ''),
+    (101, 'ENUM_PAYDEX_SCORE', 'P51060(邓白氏)', '', '80', '按期及时付款', '推断', ''),
+]
+
+write_sheet(ws_enum, overview_enum, enum_fields)
+
 
 # ========== 保存 ==========
 output_path = '/Users/wangshuaijia/workspace/tyc/数据字典_powerlink.xlsx'
