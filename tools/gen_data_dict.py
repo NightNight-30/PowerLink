@@ -5,6 +5,7 @@
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.hyperlink import Hyperlink
 
 wb = Workbook()
 
@@ -20,26 +21,50 @@ left_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
 alt_fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
 
 headers = ['序号', '字段名', '中文名称', '数据类型', '长度', '是否主键', '是否允许空', '默认值', '来源系统', '原始字段路径', '转换规则', '备注']
-col_widths = [6, 25, 18, 12, 8, 10, 10, 20, 10, 30, 24, 36]
+col_widths = [18, 25, 18, 12, 8, 10, 10, 20, 10, 30, 24, 36]
 
 
-def write_sheet(ws, overview_data, fields_data, start_overview_row=1, start_fields_row=10):
+def write_sheet(ws, overview_data, fields_data, dir_sheet_name='目录'):
+    start_overview_row = 2
+    # 动态计算字段区起始行：概览标题(1行) + 概览数据(N行) + 空行(1行) + 字段标题
+    start_fields_row = start_overview_row + 1 + len(overview_data) + 1
+    # 返回目录链接
+    ws[f'A{start_overview_row - 1}'] = '← 返回目录'
+    ws[f'A{start_overview_row - 1}'].font = Font(name='微软雅黑', bold=True, size=10, color='2E75B6', underline='single')
+    ws[f'A{start_overview_row - 1}'].hyperlink = Hyperlink(ref=f'A{start_overview_row - 1}', location=f'{dir_sheet_name}!A1', display='← 返回目录')
+
     # 概览区
     ws.merge_cells(f'A{start_overview_row}:L{start_overview_row}')
     ws[f'A{start_overview_row}'] = '数据表概览'
     ws[f'A{start_overview_row}'].font = title_font
+    ws[f'A{start_overview_row}'].alignment = left_align
+    overview_fill = PatternFill(start_color='D6E4F0', end_color='D6E4F0', fill_type='solid')
+    ws[f'A{start_overview_row}'].fill = overview_fill
+    ws[f'A{start_overview_row}'].border = thin_border
     for i, (k, v) in enumerate(overview_data):
         r = start_overview_row + 1 + i
-        ws[f'A{r}'] = k
-        ws[f'A{r}'].font = Font(name='微软雅黑', bold=True, size=10)
-        ws[f'B{r}'] = v
-        ws[f'B{r}'].font = normal_font
+        key_cell = ws[f'A{r}']
+        key_cell.value = k
+        key_cell.font = Font(name='微软雅黑', bold=True, size=10, color='1F4E79')
+        key_cell.alignment = left_align
+        key_cell.border = thin_border
+        key_cell.fill = overview_fill
+        val_cell = ws[f'B{r}']
+        val_cell.value = v
+        val_cell.font = normal_font
+        val_cell.alignment = left_align
+        val_cell.border = thin_border
+        # 合并B~L列，让值完整显示
+        ws.merge_cells(f'B{r}:L{r}')
 
     # 字段区标题
     title_row = start_fields_row
     ws.merge_cells(f'A{title_row}:L{title_row}')
     ws[f'A{title_row}'] = '字段明细'
     ws[f'A{title_row}'].font = section_font
+    ws[f'A{title_row}'].alignment = left_align
+    ws[f'A{title_row}'].fill = PatternFill(start_color='D6E4F0', end_color='D6E4F0', fill_type='solid')
+    ws[f'A{title_row}'].border = thin_border
 
     # 表头
     header_row = title_row + 1
@@ -66,6 +91,9 @@ def write_sheet(ws, overview_data, fields_data, start_overview_row=1, start_fiel
     # 列宽
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
+
+    # 冻结窗格：固定表头行，方便滚动浏览字段
+    ws.freeze_panes = f'A{header_row + 1}'
 
 
 # ========== Sheet1: api_call_record ==========
@@ -521,21 +549,80 @@ fields11 = [
 
 write_sheet(ws11, overview11, fields11)
 
+# ========== Sheet12: company_P51060_paydex_info ==========
+ws12 = wb.create_sheet('company_P51060_paydex_info')
+
+overview12 = [
+    ('数据库', 'powerlink'), ('表名', 'company_P51060_paydex_info'), ('表描述', '付款指数(邓白氏P51060接口)'),
+    ('引擎', 'InnoDB'), ('字符集', 'utf8mb4'), ('所属系统', '邓白氏数据接入'),
+    ('唯一约束', 'company_name'), ('创建日期', '2026-05-18'),
+    ('解析规则说明', '1:1关系, ON DUPLICATE KEY UPDATE; 邓白氏res为JSON字符串需二次解析; companyHistoryPayDexes(List)→JSON字符串存储; company_name来自搜索入参(entityName); 空字符串→NULL'),
+    ('与天眼查差异', 'POST请求+SHA256签名认证; 搜索参数entityName+uscc(从819表查取); 响应格式{code,res,msg,trace}中res为JSON字符串; 成功判断code=0'),
+]
+
+fields12 = [
+    (1, 'id', '主键ID', 'BIGINT', '', 'Y', 'N', '自增', '内部', '-', '-', '自增主键'),
+    (2, 'api_record_id', 'API调用记录ID', 'BIGINT', '', 'N', 'Y', '', '内部', 'api_call_record.id', '-', '关联api_call_record表'),
+    (3, 'data_create_time', '数据创建时间', 'DATETIME', '', 'N', 'Y', 'CURRENT_TIMESTAMP', '内部', '-', '-', '解析入库时间'),
+    (4, 'company_name', '主公司名(搜索关键字)', 'VARCHAR', '200', 'UK', 'N', '', '内部', '-', '-', '来自搜索入参(entityName)，非API返回'),
+    (5, 'uscc', '统一社会信用代码', 'VARCHAR', '50', 'N', 'Y', '', '邓白氏', 'res.uscc', '空字符串→NULL', 'API返回的统一社会信用代码'),
+    (6, 'company_paydex', 'PayDex评分数值(最新)', 'VARCHAR', '50', 'N', 'Y', '', '邓白氏', 'res.companyPayDex', '驼峰→下划线', '企业付款行为评分'),
+    (7, 'company_paydex_date', 'PayDex评分日期(最新)', 'VARCHAR', '20', 'N', 'Y', '', '邓白氏', 'res.companyPayDexDate', '驼峰→下划线; 空字符串→NULL', '如: 2025-0509'),
+    (8, 'company_history_paydexes', 'PayDex历史信息', 'TEXT', '', 'N', 'Y', '', '邓白氏', 'res.companyHistoryPayDexes', 'List→JSON字符串存储', 'JSON数组，含历史评分变化'),
+    (9, 'sic2', 'SIC前2位', 'VARCHAR', '20', 'N', 'Y', '', '邓白氏', 'res.sic2', '空字符串→NULL', '标准行业分类代码前2位'),
+    (10, 'sic3', 'SIC前3位', 'VARCHAR', '20', 'N', 'Y', '', '邓白氏', 'res.sic3', '空字符串→NULL', '标准行业分类代码前3位'),
+    (11, 'sic4', 'SIC前4位', 'VARCHAR', '20', 'N', 'Y', '', '邓白氏', 'res.sic4', '空字符串→NULL', '标准行业分类代码前4位'),
+    (12, 'industry_paydex_date', '行业PayDex评分日期(最新)', 'VARCHAR', '20', 'N', 'Y', '', '邓白氏', 'res.industryPayDexDate', '驼峰→下划线; 空字符串→NULL', '行业评分更新日期'),
+    (13, 'industry_lower_quartile_paydex', '行业25分位PayDex评分', 'VARCHAR', '50', 'N', 'Y', '', '邓白氏', 'res.industryLowerQuartilePayDex', '驼峰→下划线; 空字符串→NULL', '行业下四分位值'),
+    (14, 'industry_median_paydex', '行业50分位PayDex评分', 'VARCHAR', '50', 'N', 'Y', '', '邓白氏', 'res.industryMedianPayDex', '驼峰→下划线; 空字符串→NULL', '行业中位值'),
+    (15, 'industry_upper_quartile_paydex', '行业75分位PayDex评分', 'VARCHAR', '50', 'N', 'Y', '', '邓白氏', 'res.industryUpperQuartilePayDex', '驼峰→下划线; 空字符串→NULL', '行业上四分位值'),
+    (16, 'industry_count_num', '行业统计数据-样本数量', 'VARCHAR', '50', 'N', 'Y', '', '邓白氏', 'res.industryCountNum', '驼峰→下划线; 空字符串→NULL', '行业统计的企业主体样本数量'),
+    (17, 'industry_company_position', '行业位置', 'VARCHAR', '50', 'N', 'Y', '', '邓白氏', 'res.industryCompanyPosition', '驼峰→下划线; 空字符串→NULL', '企业在行业中的百分位位置'),
+    (18, 'company_average', '平均付款天数(中文)', 'VARCHAR', '100', 'N', 'Y', '', '邓白氏', 'res.companyAverage', '驼峰→下划线; 空字符串→NULL', '如: 逾期30天'),
+    (19, 'en_company_average', '平均付款天数(英文)', 'VARCHAR', '100', 'N', 'Y', '', '邓白氏', 'res.encompanyAverage', '驼峰→下划线; en前缀保留; 空字符串→NULL', '如: 30 days beyond terms'),
+    (20, 'industry_average', '行业平均付款天数(中文)', 'VARCHAR', '100', 'N', 'Y', '', '邓白氏', 'res.industryAverage', '驼峰→下划线; 空字符串→NULL', '如: 逾期19天'),
+    (21, 'en_industry_average', '行业平均付款天数(英文)', 'VARCHAR', '100', 'N', 'Y', '', '邓白氏', 'res.enindustryAverage', '驼峰→下划线; en前缀保留; 空字符串→NULL', '如: 19 days beyond terms'),
+]
+
+write_sheet(ws12, overview12, fields12)
+
+# ========== 重排Sheet顺序 ==========
+# 规则：非接口表 → 接口记录表 → 接口解析表(按接口号升序)
+desired_order = [
+    'customer_info',           # 非接口表(数据源)
+    'api_call_record',         # 接口记录表
+    'company_819_info',        # 819
+    'company_822_change_info', # 822
+    'company_854_stock_info',  # 854
+    'company_1058_risk_info',  # 1058
+    'company_1114_lawsuit_info', # 1114
+    'company_1149_scale_info', # 1149
+    'company_1168_org_type_info', # 1168
+    'company_967_main_index_info', # 967
+    'company_973_cash_flow_info',  # 973
+    'company_P51060_paydex_info',  # P51060(邓白氏)
+]
+# 按desired_order重排wb._sheets
+sheet_map = {ws.title: ws for ws in wb.worksheets}
+wb._sheets = [sheet_map[name] for name in desired_order if name in sheet_map]
+
 # ========== 目录Sheet（插入到最前面） ==========
 
 # 目录数据：序号、表名、中文名、字段数、数据关系、接口号、说明
+# 按重排后的顺序：非接口表 → 接口记录表 → 接口解析表(按接口号升序)
 dir_data = [
+    ('customer_info', '客户公司列表', 3, '-', '-', '数据源，提供搜索关键字'),
     ('api_call_record', '三方接口调用记录', 7, '1:N(所有接口共用)', '-', '所有接口的API调用原始记录，通过interface_name区分'),
     ('company_819_info', '企业基本信息', 65, '1:1', '819', '含主要人员、行业分类、资本、证件编码等'),
-    ('customer_info', '客户公司列表', 3, '-', '-', '数据源，提供搜索关键字'),
-    ('company_1058_risk_info', '企业天眼风险', 16, '1:N', '1058', '3层嵌套展平：风险类别→风险类型→风险条目'),
     ('company_822_change_info', '变更记录', 10, '1:N', '822', '2层展平：变更总数+每条变更记录'),
     ('company_854_stock_info', '上市公司企业简介', 36, '1:1', '854', '4个Object人物字段展开+非上市公司天然跳过'),
-    ('company_1168_org_type_info', '组织机构类型', 7, '1:1', '1168', 'orgTypes/economyTypes数组→逗号分隔拆列'),
-    ('company_1149_scale_info', '企业规模', 5, '1:1', '1149', 'result直接为字符串(如"大型")'),
-    ('company_967_main_index_info', '主要指标-年度', 38, '1:N', '967', '~28个DECIMAL字段，每年度一行'),
+    ('company_1058_risk_info', '企业天眼风险', 16, '1:N', '1058', '3层嵌套展平：风险类别→风险类型→风险条目'),
     ('company_1114_lawsuit_info', '法律诉讼', 31, '1:N', '1114', '翻页合并+casePersons前2人展开'),
+    ('company_1149_scale_info', '企业规模', 5, '1:1', '1149', 'result直接为字符串(如"大型")'),
+    ('company_1168_org_type_info', '组织机构类型', 7, '1:1', '1168', 'orgTypes/economyTypes数组→逗号分隔拆列'),
+    ('company_967_main_index_info', '主要指标-年度', 38, '1:N', '967', '~28个DECIMAL字段，每年度一行'),
     ('company_973_cash_flow_info', '现金流量表', 41, '1:N', '973', '37个VARCHAR字段+showYear，API默认返回最近一期'),
+    ('company_P51060_paydex_info', '付款指数', 21, '1:1', 'P51060', '邓白氏PAYDEX评分+行业基准+历史评分(JSON); POST+SHA256签名认证'),
 ]
 
 ws_dir = wb.create_sheet('目录', 0)  # 插入到位置0（最前面）
@@ -544,6 +631,10 @@ ws_dir = wb.create_sheet('目录', 0)  # 插入到位置0（最前面）
 ws_dir.merge_cells('A1:G1')
 ws_dir['A1'] = 'PowerLink 数据字典目录'
 ws_dir['A1'].font = Font(name='微软雅黑', bold=True, size=16, color='1F4E79')
+ws_dir['A1'].alignment = Alignment(horizontal='center', vertical='center')
+ws_dir['A1'].fill = PatternFill(start_color='D6E4F0', end_color='D6E4F0', fill_type='solid')
+ws_dir['A1'].border = thin_border
+ws_dir.row_dimensions[1].height = 36
 
 # 表头
 dir_headers = ['序号', '表名(点击跳转)', '中文描述', '字段数', '数据关系', '接口号', '说明']
@@ -565,12 +656,12 @@ for row_idx, (table_name, chinese, field_count, relation, api_num, desc) in enum
     ws_dir.cell(row=r, column=1).alignment = center_align
     ws_dir.cell(row=r, column=1).border = thin_border
 
-    # 表名+超链接
+    # 表名+超链接（使用location格式，内部链接不带#前缀）
     link_cell = ws_dir.cell(row=r, column=2, value=table_name)
     link_cell.font = Font(name='微软雅黑', size=10, color='2E75B6', underline='single')
     link_cell.alignment = left_align
     link_cell.border = thin_border
-    link_cell.hyperlink = f"#{table_name}!A1"
+    link_cell.hyperlink = Hyperlink(ref=f'B{r}', location=f'{table_name}!A1', display=table_name)
 
     ws_dir.cell(row=r, column=3, value=chinese).font = normal_font
     ws_dir.cell(row=r, column=3).alignment = center_align

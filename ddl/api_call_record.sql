@@ -1,11 +1,11 @@
 -- ============================================
--- 天眼查数据接入 - 建表DDL (powerlink库)
+-- 天眼查/邓白氏数据接入 - 建表DDL (powerlink库)
 -- ============================================
 
 -- 1. 接口调用记录表
 CREATE TABLE IF NOT EXISTS api_call_record (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-  interface_name VARCHAR(32)  NOT NULL COMMENT '接口名，如819/967/971/973',
+  interface_name VARCHAR(32)  NOT NULL COMMENT '接口名，如819/967/P51060等',
   call_datetime  DATETIME     NOT NULL COMMENT '调用日期时间',
   input_param    VARCHAR(200) NOT NULL COMMENT '入参，公司名',
   status_code    INT          NOT NULL COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
@@ -357,3 +357,32 @@ CREATE TABLE IF NOT EXISTS company_973_cash_flow_info (
   INDEX idx_company_name (company_name),
   INDEX idx_api_record (api_record_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='现金流量表(973接口)';
+
+-- 12. 付款指数表 (邓白氏P51060接口解析目标)
+-- 解析规则：1:1关系，ON DUPLICATE KEY UPDATE
+-- res为JSON字符串，解析后各字段入库
+-- companyHistoryPayDexes为List → JSON字符串存储
+CREATE TABLE IF NOT EXISTS company_P51060_paydex_info (
+  id                            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_record_id                 BIGINT              COMMENT 'API调用记录ID(关联api_call_record.id)',
+  data_create_time              DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  company_name                  VARCHAR(200) NOT NULL COMMENT '主公司名(搜索关键字/入参,entityName)',
+  uscc                          VARCHAR(50)          COMMENT '统一社会信用代码(res.uscc)',
+  company_paydex                VARCHAR(50)          COMMENT 'PayDex评分数值(最新)(res.companyPayDex)',
+  company_paydex_date           VARCHAR(20)          COMMENT 'PayDex评分日期(最新)(res.companyPayDexDate)',
+  company_history_paydexes      TEXT                 COMMENT 'PayDex历史信息(res.companyHistoryPayDexes,JSON字符串)',
+  sic2                          VARCHAR(20)          COMMENT 'SIC前2位(res.sic2)',
+  sic3                          VARCHAR(20)          COMMENT 'SIC前3位(res.sic3)',
+  sic4                          VARCHAR(20)          COMMENT 'SIC前4位(res.sic4)',
+  industry_paydex_date          VARCHAR(20)          COMMENT '行业PayDex评分日期(最新)(res.industryPayDexDate)',
+  industry_lower_quartile_paydex VARCHAR(50)         COMMENT '行业25分位PayDex评分数值(res.industryLowerQuartilePayDex)',
+  industry_median_paydex        VARCHAR(50)          COMMENT '行业50分位PayDex评分数值(res.industryMedianPayDex)',
+  industry_upper_quartile_paydex VARCHAR(50)         COMMENT '行业75分位PayDex评分数值(res.industryUpperQuartilePayDex)',
+  industry_count_num            VARCHAR(50)          COMMENT '行业统计数据-样本数量(res.industryCountNum)',
+  industry_company_position     VARCHAR(50)          COMMENT '行业位置(res.industryCompanyPosition)',
+  company_average               VARCHAR(100)         COMMENT '平均付款天数(中文)(res.companyAverage)',
+  en_company_average            VARCHAR(100)         COMMENT '平均付款天数(英文)(res.encompanyAverage)',
+  industry_average              VARCHAR(100)         COMMENT '行业平均付款天数(中文)(res.industryAverage)',
+  en_industry_average           VARCHAR(100)         COMMENT '行业平均付款天数(英文)(res.enindustryAverage)',
+  UNIQUE KEY uk_company_name (company_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='付款指数(邓白氏P51060接口)';
