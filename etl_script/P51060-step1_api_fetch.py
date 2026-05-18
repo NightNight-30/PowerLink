@@ -23,7 +23,7 @@
   - 指定公司名：只拉取指定公司
 """
 
-import base64
+# base64 removed - using raw values from config
 import pymysql
 import requests
 import json
@@ -166,8 +166,8 @@ def call_api(keyword: str) -> Dict[str, Any]:
     api_config = get_api_config()
     provider_config = CONFIG['providers'][api_config['provider']]
 
-    client_key = base64.b64decode(provider_config['client_key']).decode('utf-8')
-    client_secret = base64.b64decode(provider_config['client_secret']).decode('utf-8')
+    client_key = provider_config['client_key']
+    client_secret = provider_config['client_secret']
     sku_no = api_config['sku_no']
     timestamp = str(int(time.time() * 1000))
     tid = str(uuid.uuid4())
