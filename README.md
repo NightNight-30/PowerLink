@@ -7,7 +7,8 @@
 ```
 PowerLink/
 ├── ddl/                    # 数据库建表DDL
-│   └── api_call_record.sql
+│   ├── api_call_record.sql
+│   └── databricks_ods_ddl.sql
 ├── etl_script/             # ETL脚本（拉取+解析）
 │   ├── 819-step1_api_fetch.py
 │   ├── 819-step2_data_parse.py
@@ -377,6 +378,39 @@ python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
 - `company_1114_lawsuit_info` — 法律诉讼表（31个字段）
 - `company_973_cash_flow_info` — 现金流量表（41个字段）
 - `company_P51060_paydex_info` — 付款指数（21个字段）
+
+---
+
+## [databricks_ods_ddl.sql](ddl/databricks_ods_ddl.sql) — Databricks ODS层DDL
+
+MySQL 11张接口数据表迁移到Databricks大数据平台ODS层的建表DDL。
+
+**命名规则**：`ods_pl_` 前缀（PowerLink项目缩写），字段名与MySQL完全一致便于追溯。
+
+**类型映射**：
+
+| MySQL | Databricks | 说明 |
+|:------|:-----------|:-----|
+| VARCHAR(n)/TEXT/LONGTEXT | STRING | Spark SQL无VARCHAR |
+| JSON | STRING | 存原始JSON，可用`from_json()`解析 |
+| DATETIME | TIMESTAMP | Spark时间类型 |
+| BIGINT/INT/DECIMAL(24,4) | 保持不变 | 直接映射 |
+
+**ODS层规范**：USING PARquet存储，无约束（无PK/UK/索引），数据完整性由ETL保证。
+
+| # | MySQL表名 | Databricks表名 | 数据关系 |
+|---|-----------|---------------|---------|
+| 1 | api_call_record | ods_pl_api_call_record | 调用记录 |
+| 2 | company_819_info | ods_pl_company_819_info | 1:1 |
+| 3 | company_822_change_info | ods_pl_company_822_change_info | 1:N |
+| 4 | company_854_stock_info | ods_pl_company_854_stock_info | 1:1 |
+| 5 | company_1058_risk_info | ods_pl_company_1058_risk_info | 1:N |
+| 6 | company_1114_lawsuit_info | ods_pl_company_1114_lawsuit_info | 1:N |
+| 7 | company_1149_scale_info | ods_pl_company_1149_scale_info | 1:1 |
+| 8 | company_1168_org_type_info | ods_pl_company_1168_org_type_info | 1:1 |
+| 9 | company_967_main_index_info | ods_pl_company_967_main_index_info | 1:N |
+| 10 | company_973_cash_flow_info | ods_pl_company_973_cash_flow_info | 1:N |
+| 11 | company_P51060_paydex_info | ods_pl_company_P51060_paydex_info | 1:1 |
 
 ---
 
