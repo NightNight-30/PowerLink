@@ -22,7 +22,7 @@ LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_c
 COMMENT '三方接口调用记录表(ODS层)';
 
 -- 2. 企业基本信息表 (819接口)
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_819_info_df (
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_819_df (
   api_record_id               BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time            TIMESTAMP     COMMENT '数据创建时间',
   company_name                STRING        COMMENT '公司名(搜索关键字/入参，非API返回)',
@@ -89,11 +89,11 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_819_info_df (
   industry_all_category_code_fourth STRING  COMMENT '国民经济行业分类-小类代码'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_company_819_info_df'
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_819_df'
 COMMENT '企业基本信息(819接口,ODS层)';
 
 -- 3. 企业天眼风险表 (1058接口, 1:N)
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_1058_risk_info_df (
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_1058_df (
   api_record_id       BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time    TIMESTAMP     COMMENT '数据创建时间',
   main_company_name   STRING        COMMENT '主公司名(搜索关键字/入参)',
@@ -111,11 +111,11 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_1058_risk_info_df (
   risk_desc           STRING        COMMENT '风险简述(riskList[].list[].list[].desc)'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_company_1058_risk_info_df'
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_1058_df'
 COMMENT '企业天眼风险(1058接口,ODS层)';
 
 -- 4. 变更记录表 (822接口, 1:N)
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_822_change_info_df (
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_822_df (
   api_record_id    BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time TIMESTAMP     COMMENT '数据创建时间',
   company_name     STRING        COMMENT '主公司名(搜索关键字/入参)',
@@ -127,11 +127,11 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_822_change_info_df (
   create_time      STRING        COMMENT '记录创建时间(result.items[].createTime)'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_company_822_change_info_df'
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_822_df'
 COMMENT '变更记录(822接口,ODS层)';
 
 -- 5. 上市公司企业简介表 (854接口, 1:1)
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_854_stock_info_df (
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_854_df (
   api_record_id           BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time        TIMESTAMP     COMMENT '数据创建时间',
   company_name            STRING        COMMENT '主公司名(搜索关键字/入参)',
@@ -169,11 +169,11 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_854_stock_info_df (
   introduction            STRING        COMMENT '简介(result.introduction)'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_company_854_stock_info_df'
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_854_df'
 COMMENT '上市公司企业简介(854接口,ODS层)';
 
 -- 6. 组织机构类型表 (1168接口, 1:1)
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_1168_org_type_info_df (
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_1168_df (
   api_record_id     BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time  TIMESTAMP     COMMENT '数据创建时间',
   company_name      STRING        COMMENT '主公司名(搜索关键字/入参)',
@@ -183,23 +183,23 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_1168_org_type_info_df (
   economy_type_level2 STRING      COMMENT '二级经济类型(result.economyTypes[].level2,逗号分隔)'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_company_1168_org_type_info_df'
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_1168_df'
 COMMENT '组织机构类型(1168接口,ODS层)';
 
 -- 7. 企业规模表 (1149接口, 1:1)
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_1149_scale_info_df (
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_1149_df (
   api_record_id     BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time  TIMESTAMP     COMMENT '数据创建时间',
   company_name      STRING        COMMENT '主公司名(搜索关键字/入参)',
   company_scale     STRING        COMMENT '企业规模(result字符串,如"大型")'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_company_1149_scale_info_df'
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_1149_df'
 COMMENT '企业规模(1149接口,ODS层)';
 
 -- 8. 主要指标-年度表 (967接口, 1:N)
 -- DECIMAL字段0为有效值，不转NULL
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_967_main_index_info_df (
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_967_df (
   api_record_id               BIGINT          COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time            TIMESTAMP       COMMENT '数据创建时间',
   company_name                STRING          COMMENT '主公司名(搜索关键字/入参)',
@@ -239,11 +239,11 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_967_main_index_info_df (
   capital_reserve             DECIMAL(24,4)   COMMENT '每股公积金(元)'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_company_967_main_index_info_df'
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_967_df'
 COMMENT '主要指标-年度(967接口,ODS层)';
 
 -- 9. 法律诉讼表 (1114接口, 1:N)
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_1114_lawsuit_info_df (
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_1114_df (
   api_record_id     BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time  TIMESTAMP     COMMENT '数据创建时间',
   company_name      STRING        COMMENT '主公司名(搜索关键字/入参)',
@@ -276,11 +276,11 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_1114_lawsuit_info_df (
   type2             STRING        COMMENT '类型2(casePersons[1].type)'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_company_1114_lawsuit_info_df'
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_1114_df'
 COMMENT '法律诉讼(1114接口,ODS层)';
 
 -- 10. 现金流量表 (973接口, 1:N)
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_973_cash_flow_info_df (
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_973_df (
   api_record_id               BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time            TIMESTAMP     COMMENT '数据创建时间',
   company_name                STRING        COMMENT '主公司名(搜索关键字/入参)',
@@ -323,11 +323,11 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_973_cash_flow_info_df (
   effect_of_exchange_chg_on_cce STRING       COMMENT '汇率变动对现金及现金等价物的影响'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_company_973_cash_flow_info_df'
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_973_df'
 COMMENT '现金流量表(973接口,ODS层)';
 
 -- 11. 付款指数表 (邓白氏P51060接口, 1:1)
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_P51060_paydex_info_df (
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_dnb_P51060_df (
   api_record_id                 BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time              TIMESTAMP     COMMENT '数据创建时间',
   company_name                  STRING        COMMENT '主公司名(搜索关键字/入参,entityName)',
@@ -350,5 +350,5 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_company_P51060_paydex_info_df (
   en_industry_average           STRING        COMMENT '行业平均付款天数(英文)(res.enindustryAverage)'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_company_P51060_paydex_info_df'
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_dnb_P51060_df'
 COMMENT '付款指数(邓白氏P51060接口,ODS层)';

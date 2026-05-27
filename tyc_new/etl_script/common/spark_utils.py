@@ -37,31 +37,23 @@ MAX_RETRY = 3
 
 # ========== Schema定义 ==========
 
-def get_api_call_record_schema() -> StructType:
-    return StructType([
-        StructField("interface_name", StringType(), False),
-        StructField("call_datetime", StringType(), False),
-        StructField("input_param", StringType(), False),
-        StructField("status_code", IntegerType(), False),
-        StructField("output_result", StringType(), True),
-        StructField("create_time", TimestampType(), True),
-        StructField("dt", StringType(), False),
-    ])
+# write_api_records从Delta表动态读取schema，不再需要硬编码schema
+# get_api_call_record_schema()已移除（硬编码类型与DDL不一致会导致schema冲突）
 
 
 def get_target_table_name(interface_key: str) -> str:
-    """接口号 → 目标Delta表全名"""
+    """接口号 → 目标Delta表全名 (格式: ods_{接口类型}_{接口id}_df)"""
     name_map = {
-        '819':   'ods_company_819_info_df',
-        '1058':  'ods_company_1058_risk_info_df',
-        '822':   'ods_company_822_change_info_df',
-        '854':   'ods_company_854_stock_info_df',
-        '1168':  'ods_company_1168_org_type_info_df',
-        '1149':  'ods_company_1149_scale_info_df',
-        '967':   'ods_company_967_main_index_info_df',
-        '1114':  'ods_company_1114_lawsuit_info_df',
-        '973':   'ods_company_973_cash_flow_info_df',
-        'P51060': 'ods_company_P51060_paydex_info_df',
+        '819':   'ods_tyc_819_df',
+        '1058':  'ods_tyc_1058_df',
+        '822':   'ods_tyc_822_df',
+        '854':   'ods_tyc_854_df',
+        '1168':  'ods_tyc_1168_df',
+        '1149':  'ods_tyc_1149_df',
+        '967':   'ods_tyc_967_df',
+        '1114':  'ods_tyc_1114_df',
+        '973':   'ods_tyc_973_df',
+        'P51060': 'ods_dnb_P51060_df',
     }
     table_name = name_map.get(interface_key)
     if not table_name:
@@ -127,22 +119,31 @@ def has_success_today(spark, interface_name: str, keyword: str, dt: str) -> bool
 def write_api_records(spark, records: List[Dict], dt: str):
     """
     将API调用记录写入ods_api_call_record_df (append模式)
+    从Delta表读取schema，避免硬编码类型不匹配
     自动添加id(monotonically_increasing_id)和create_time(current_timestamp)
     """
     if not records:
         print("[INFO] 无新记录需要写入")
         return
 
-    # 为每条记录添加dt
     for rec in records:
         rec['dt'] = dt
 
-    schema = get_api_call_record_schema()
-    df = spark.createDataFrame(records, schema=schema)
+    table_schema = spark.table(API_RECORD_TABLE).schema
+    schema_field_names = {f.name for f in table_schema.fields}
 
-    # 添加id和create_time
+    filtered_records = []
+    for rec in records:
+        filtered_rec = {k: v for k, v in rec.items() if k in schema_field_names}
+        filtered_records.append(filtered_rec)
+
+    record_keys = set(filtered_records[0].keys())
+    create_schema = StructType([f for f in table_schema.fields if f.name in record_keys])
+    df = spark.createDataFrame(filtered_records, schema=create_schema)
+
     df = df.withColumn("id", monotonically_increasing_id())
     df = df.withColumn("create_time", current_timestamp())
+    df = df.select(*[f.name for f in table_schema.fields])
 
     df.write.mode("append").format("delta").saveAsTable(API_RECORD_TABLE)
     print(f"[INFO] 写入API调用记录: {len(records)}条 (dt={dt})")
@@ -188,7 +189,7 @@ def write_target_data(spark, parsed_rows: List[Dict], table_name: str, dt: str,
 
     for row in parsed_rows:
         row['dt'] = dt
-        row['data_create_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        row['data_create_time'] = datetime.now()
 
     # 从现有Delta表获取schema用于DataFrame创建
     target_schema = spark.table(table_name).schema
@@ -295,8 +296,9 @@ def get_today_success_records(spark, interface_name: str, dt: str,
 
 def get_uscc(spark, company_name: str) -> Optional[str]:
     """从819信息表查询公司的统一社会信用代码(邓白氏接口用)"""
+    table_819 = get_target_table_name('819')
     result = spark.sql(
-        f"SELECT social_credit_code FROM {CATALOG}.{SCHEMA}.ods_company_819_info_df "
+        f"SELECT social_credit_code FROM {table_819} "
         f"WHERE company_name = '{company_name}' AND social_credit_code IS NOT NULL "
         f"AND social_credit_code != '' LIMIT 1"
     ).collect()
@@ -313,10 +315,11 @@ def camel_to_snake(name: str) -> str:
     return pattern.sub('_', name).lower()
 
 
-def timestamp_to_datetime(ts: Any) -> Optional[str]:
+def timestamp_to_datetime(ts: Any) -> Optional[datetime]:
     """
-    BIGINT时间戳 → datetime字符串
+    BIGINT时间戳 → datetime对象
     >=1e10 → 毫秒级(÷1000)；<1e10 → 秒级(直接转)
+    返回datetime对象而非字符串，适配Delta TIMESTAMP列
     """
     if ts is None or ts == '' or ts == 0:
         return None
@@ -326,8 +329,7 @@ def timestamp_to_datetime(ts: Any) -> Optional[str]:
             ts_seconds = int(ts_num // 1000)
         else:
             ts_seconds = int(ts_num)
-        dt = datetime.fromtimestamp(ts_seconds)
-        return dt.strftime('%Y-%m-%d %H:%M:%S')
+        return datetime.fromtimestamp(ts_seconds)
     except (ValueError, TypeError, OSError, OverflowError):
         return None
 

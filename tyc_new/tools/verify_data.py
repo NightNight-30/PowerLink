@@ -17,7 +17,7 @@
 
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'etl_script'))
@@ -82,7 +82,7 @@ def verify_target_table(spark, interface_key: str, dt: str):
 
 def main():
     spark = get_spark()
-    dt = datetime.now().strftime('%Y-%m-%d')
+    dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
 
     target_keys = [sys.argv[1]] if len(sys.argv) > 1 else INTERFACE_KEYS
 

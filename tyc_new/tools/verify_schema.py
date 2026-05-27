@@ -23,16 +23,16 @@ from common.spark_utils import get_spark, CATALOG, SCHEMA
 
 EXPECTED_TABLES = [
     'ods_api_call_record_df',
-    'ods_company_819_info_df',
-    'ods_company_1058_risk_info_df',
-    'ods_company_822_change_info_df',
-    'ods_company_854_stock_info_df',
-    'ods_company_1168_org_type_info_df',
-    'ods_company_1149_scale_info_df',
-    'ods_company_967_main_index_info_df',
-    'ods_company_1114_lawsuit_info_df',
-    'ods_company_973_cash_flow_info_df',
-    'ods_company_P51060_paydex_info_df',
+    'ods_tyc_819_df',
+    'ods_tyc_1058_df',
+    'ods_tyc_822_df',
+    'ods_tyc_854_df',
+    'ods_tyc_1168_df',
+    'ods_tyc_1149_df',
+    'ods_tyc_967_df',
+    'ods_tyc_1114_df',
+    'ods_tyc_973_df',
+    'ods_dnb_P51060_df',
 ]
 
 

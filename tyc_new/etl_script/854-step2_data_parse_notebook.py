@@ -1,27 +1,14 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-【Step2】天眼查854接口 - 数据解析(Databricks版)
+"""【Notebook版】天眼查854接口 - 数据解析(上市信息)
+前置条件: Cell1已执行notebook_init, Step1已执行
 
-解析规则（与原版相同）：
+解析规则：
   4个Object字段展开：generalManager/chairman/secretaries/legal 各→type+name+id
   非上市公司API返回error_code=300000，step1记录失败，step2天然跳过
-
-入库方式：动态分区覆盖（1:1）
-
-执行方式：
-  spark-submit 854-step2_data_parse.py [公司名]
 """
 
-import sys
-import os
-import json
-import traceback
-from datetime import datetime
-from typing import Dict, Optional, Any
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
+import json, traceback
+from datetime import datetime, timedelta
 from common.config_loader import load_config, get_interface_name
 from common.spark_utils import (
     get_spark, get_today_success_records, write_target_data,
@@ -31,9 +18,15 @@ from common.spark_utils import (
 INTERFACE_KEY = '854'
 CONFIG = load_config()
 INTERFACE_NAME = get_interface_name(CONFIG, INTERFACE_KEY)
+spark = get_spark()
+dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+table_name = get_target_table_name(INTERFACE_KEY)
 
+# target_company = None  # 设为None=全量解析, 或指定公司名如"广东领益智造股份有限公司"
 
-def extract_person_fields(person_obj: Optional[Dict]) -> Dict:
+# ========== 解析函数 ==========
+
+def extract_person_fields(person_obj):
     """从Object字段提取type/name/id，空值或id=0转为NULL"""
     if not person_obj:
         return {'type': None, 'name': None, 'id': None}
@@ -61,7 +54,7 @@ def extract_person_fields(person_obj: Optional[Dict]) -> Dict:
     return {'type': c_type, 'name': name, 'id': pid}
 
 
-def parse_stock_data(api_result: Dict, keyword: str, record_id: int) -> Dict:
+def parse_stock_data(api_result, keyword, record_id):
     """解析854接口数据，返回一行记录"""
     result = api_result.get('result')
 
@@ -108,65 +101,47 @@ def parse_stock_data(api_result: Dict, keyword: str, record_id: int) -> Dict:
     }
     return row
 
+# ========== 执行 ==========
 
-def main():
-    spark = get_spark()
-    dt = datetime.now().strftime('%Y-%m-%d')
-    table_name = get_target_table_name(INTERFACE_KEY)
+print("=" * 60)
+print(f"【Step2】天眼查{INTERFACE_KEY}接口({INTERFACE_NAME}) - 数据解析(Notebook版)")
+print("=" * 60)
+print(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"分区dt: {dt}")
+print(f"目标表: {table_name}")
+print()
 
-    print("=" * 60)
-    print(f"【Step2】天眼查{INTERFACE_KEY}接口({INTERFACE_NAME}) - 数据解析(Databricks版)")
-    print("=" * 60)
-    print(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"分区dt: {dt}")
-    print(f"目标表: {table_name}")
-    print()
+records = get_today_success_records(spark, INTERFACE_NAME, dt, company_name=target_company)
 
-    try:
-        target_company = sys.argv[1] if len(sys.argv) > 1 else None
-        if target_company:
-            print(f"[INFO] 解析指定公司: {target_company}")
+if not records:
+    print("[WARNING] 没有获取到成功记录，任务结束")
+else:
+    stats = {'PARSED': 0, 'ERROR': 0}
+    all_parsed_rows = []
 
-        records = get_today_success_records(spark, INTERFACE_NAME, dt, target_company)
-
-        if not records:
-            print("[WARNING] 没有获取到成功记录，任务结束")
-            return
-
-        stats = {'PARSED': 0, 'ERROR': 0}
-        all_parsed_rows = []
-
-        for i, rec in enumerate(records, 1):
-            keyword = rec['input_param']
-            print(f"\n[{i}/{len(records)}] {keyword}")
-            print("-" * 60)
-
-            try:
-                row = parse_stock_data(rec['output_result'], keyword, rec['id'])
-                all_parsed_rows.append(row)
-                print(f"[SUCCESS] 解析入库: {keyword}")
-                stats['PARSED'] += 1
-            except Exception as e:
-                print(f"[ERROR] 解析失败: {e}")
-                traceback.print_exc()
-                stats['ERROR'] += 1
-
-        if all_parsed_rows:
-            write_target_data(spark, all_parsed_rows, table_name, dt,
-                              is_one_to_one=True, company_name=target_company)
-
-        print("\n" + "=" * 60)
-        print("解析完成！")
+    for i, rec in enumerate(records, 1):
+        keyword = rec['input_param']
+        print(f"\n[{i}/{len(records)}] {keyword}")
         print("-" * 60)
-        print(f"总计: {len(records)} 条成功记录")
-        print(f"  PARSED: {stats['PARSED']}")
-        print(f"  ERROR:  {stats['ERROR']}")
-        print("=" * 60)
-    except Exception as e:
-        print(f"[FATAL] 任务执行失败: {e}")
-        traceback.print_exc()
-        sys.exit(1)
 
+        try:
+            row = parse_stock_data(rec['output_result'], keyword, rec['id'])
+            all_parsed_rows.append(row)
+            print(f"[SUCCESS] 解析入库: {keyword}")
+            stats['PARSED'] += 1
+        except Exception as e:
+            print(f"[ERROR] 解析失败: {e}")
+            traceback.print_exc()
+            stats['ERROR'] += 1
 
-if __name__ == '__main__':
-    main()
+    if all_parsed_rows:
+        write_target_data(spark, all_parsed_rows, table_name, dt,
+                          is_one_to_one=True, company_name=target_company)
+
+    print("\n" + "=" * 60)
+    print("解析完成！")
+    print("-" * 60)
+    print(f"总计: {len(records)} 条成功记录")
+    print(f"  PARSED: {stats['PARSED']}")
+    print(f"  ERROR:  {stats['ERROR']}")
+    print("=" * 60)
