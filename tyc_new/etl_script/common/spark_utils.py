@@ -119,6 +119,7 @@ def has_success_today(spark, interface_name: str, keyword: str, dt: str) -> bool
 def write_api_records(spark, records: List[Dict], dt: str):
     """
     将API调用记录写入ods_api_call_record_df (append模式)
+    写入前删除同公司同接口同dt的旧记录，确保每天每公司只保留1条最终记录
     从Delta表读取schema，避免硬编码类型不匹配
     自动添加id(monotonically_increasing_id)和create_time(current_timestamp)
     """
@@ -129,6 +130,17 @@ def write_api_records(spark, records: List[Dict], dt: str):
     for rec in records:
         rec['dt'] = dt
 
+    # 删除旧记录: 同公司+同接口+同dt，避免重试产生冗余数据
+    for rec in records:
+        interface_name = rec.get('interface_name', '')
+        input_param = rec.get('input_param', '')
+        if interface_name and input_param:
+            spark.sql(
+                f"DELETE FROM {API_RECORD_TABLE} "
+                f"WHERE dt = '{dt}' AND interface_name = '{interface_name}' "
+                f"AND input_param = '{input_param}'"
+            )
+
     table_schema = spark.table(API_RECORD_TABLE).schema
     schema_field_names = {f.name for f in table_schema.fields}
 
@@ -137,16 +149,21 @@ def write_api_records(spark, records: List[Dict], dt: str):
         filtered_rec = {k: v for k, v in rec.items() if k in schema_field_names}
         filtered_records.append(filtered_rec)
 
-    record_keys = set(filtered_records[0].keys())
-    create_schema = StructType([f for f in table_schema.fields if f.name in record_keys])
-    df = spark.createDataFrame(filtered_records, schema=create_schema)
+    # 生成唯一id: 当前表最大id + 递增偏移
+    max_id_result = spark.sql(f"SELECT COALESCE(MAX(id), -1) FROM {API_RECORD_TABLE}").collect()[0][0]
+    start_id = max_id_result + 1
+    for i, rec in enumerate(filtered_records):
+        rec['id'] = start_id + i
+        rec['create_time'] = datetime.now()
 
-    df = df.withColumn("id", monotonically_increasing_id())
-    df = df.withColumn("create_time", current_timestamp())
+    # 创建DataFrame时包含id和create_time
+    record_keys_with_meta = set(filtered_records[0].keys())
+    create_schema = StructType([f for f in table_schema.fields if f.name in record_keys_with_meta])
+    df = spark.createDataFrame(filtered_records, schema=create_schema)
     df = df.select(*[f.name for f in table_schema.fields])
 
     df.write.mode("append").format("delta").saveAsTable(API_RECORD_TABLE)
-    print(f"[INFO] 写入API调用记录: {len(records)}条 (dt={dt})")
+    print(f"[INFO] 写入API调用记录: {len(records)}条 (dt={dt}, id从{start_id}起)")
 
 
 def write_target_data(spark, parsed_rows: List[Dict], table_name: str, dt: str,

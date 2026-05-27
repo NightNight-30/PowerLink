@@ -22,7 +22,7 @@ spark = get_spark()
 dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
 table_name = get_target_table_name(INTERFACE_KEY)
 
-# target_company = None  # 设为None=全量解析, 或指定公司名如"广东领益智造股份有限公司"
+target_company = None  # 设为None=全量解析, 或指定公司名如"广东领益智造股份有限公司"
 
 # ========== 解析函数 ==========
 
@@ -125,7 +125,7 @@ else:
         print("-" * 60)
 
         try:
-            row = parse_stock_data(rec['output_result'], keyword, rec['id'])
+            row = parse_stock_data(json.loads(rec['output_result_str']), keyword, rec['id'])
             all_parsed_rows.append(row)
             print(f"[SUCCESS] 解析入库: {keyword}")
             stats['PARSED'] += 1

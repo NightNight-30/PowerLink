@@ -24,7 +24,7 @@ spark = get_spark()
 dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
 table_name = get_target_table_name(INTERFACE_KEY)
 
-# target_company = None  # 设为None=全量解析, 或指定公司名如"广东领益智造股份有限公司"
+target_company = None  # 设为None=全量解析, 或指定公司名如"广东领益智造股份有限公司"
 
 # ========== 常量定义 ==========
 
@@ -102,7 +102,7 @@ else:
         print("-" * 60)
 
         try:
-            row = parse_paydex_data(rec['output_result'], keyword, rec['id'])
+            row = parse_paydex_data(json.loads(rec['output_result_str']), keyword, rec['id'])
             if row is None:
                 stats['SKIP_EMPTY'] += 1
                 continue

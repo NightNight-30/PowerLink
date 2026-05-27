@@ -3,21 +3,19 @@
 """
 配置加载模块 - Databricks版本
 
-与原版差异：
-  - 去除mysql配置段（Databricks用SparkSession替代）
-  - 支持从本地文件或DBFS读取config.json
-  - CONFIG_PATH可通过环境变量或CLI参数指定
+从Unity Catalog Volume读取config.json:
+  - 默认路径: /Volumes/powerlink/default/env/config.json
+  - 环境变量 TYC_CONFIG_PATH 可覆盖
 """
 
 import json
 import os
-import sys
 from typing import Dict
 
 
 CONFIG_PATH = os.environ.get(
     'TYC_CONFIG_PATH',
-    '/dbfs/opt/tyc_new/config.json' if os.path.exists('/dbfs') else 'config.json'
+    '/Volumes/powerlink/default/env/config.json'
 )
 
 
