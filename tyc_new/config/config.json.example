@@ -1,0 +1,18 @@
+{
+  "providers": {
+    "tyc": { "token": "<YOUR_TYC_TOKEN>" },
+    "dnb": { "client_key": "<YOUR_DNB_CLIENT_KEY_BASE64>", "client_secret": "<YOUR_DNB_CLIENT_SECRET_BASE64>" }
+  },
+  "apis": {
+    "819":   { "name": "企业基本信息（含主要人员）", "url": "http://open.api.tianyancha.com/services/open/ic/baseinfoV3/2.0", "provider": "tyc", "timeout": 30 },
+    "1058":  { "name": "企业天眼风险",             "url": "http://open.api.tianyancha.com/services/open/risk/baseinfo/2.0", "provider": "tyc", "timeout": 30 },
+    "822":   { "name": "变更记录",                 "url": "http://open.api.tianyancha.com/services/open/ic/changeinfo/2.0", "provider": "tyc", "timeout": 30 },
+    "854":   { "name": "上市公司企业简介",           "url": "http://open.api.tianyancha.com/services/open/stock/baseinfo/2.0", "provider": "tyc", "timeout": 30 },
+    "1168":  { "name": "组织机构",                 "url": "http://open.api.tianyancha.com/services/open/ic/orgtype/2.0", "provider": "tyc", "timeout": 30 },
+    "1149":  { "name": "企业规模",                 "url": "http://open.api.tianyancha.com/services/open/ic/companyScale/2.0", "provider": "tyc", "timeout": 30 },
+    "967":   { "name": "主要指标-年度",             "url": "http://open.api.tianyancha.com/services/open/fin/mainindex/2.0", "provider": "tyc", "timeout": 30 },
+    "1114":  { "name": "法律诉讼",                 "url": "http://open.api.tianyancha.com/services/open/law/lawsuit/2.0", "provider": "tyc", "timeout": 30 },
+    "973":   { "name": "现金流量表",               "url": "http://open.api.tianyancha.com/services/open/fin/cashflow/2.0", "provider": "tyc", "timeout": 30 },
+    "P51060": { "name": "付款指数（PAYDEX®）",      "url": "https://openapi.dnb.com.cn/v1/api/callDNBInterface", "provider": "dnb", "timeout": 30, "sku_no": "OPSP-109244-21", "api_id": "P51060" }
+  }
+}
