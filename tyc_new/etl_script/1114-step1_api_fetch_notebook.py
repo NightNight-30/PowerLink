@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """【Notebook版】天眼查1114接口 - API数据拉取(含翻页)
-核心改动: 两阶段分离 - API调用(事不过三+翻页) + Delta写入(失败直接终止)
+核心改动: 查询即计费接口，失败不重试，直接返回失败记录(保留翻页逻辑)
 前置条件: Cell1已执行notebook_init
 
 1114接口支持翻页(pageNum/pageSize)，天眼查最多返回500条记录
-Phase1采用循环翻页策略，合并所有页数据存入一条记录
+翻页逻辑保留，但失败不重试
 """
 
 from common.config_loader import load_config, get_interface_name, get_api_config
-from common.spark_utils import (get_spark, get_company_list, has_success_today, write_api_records, MAX_RETRY)
+from common.spark_utils import (get_spark, get_company_list, has_success_today, write_api_records)
 import json, requests, traceback
 from datetime import datetime, timedelta
 
@@ -25,11 +25,11 @@ print("=" * 60)
 print(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print(f"分区dt: {dt}")
 print(f"翻页策略: pageSize={PAGE_SIZE}, 循环拉取所有页合并存储")
-print(f"重试策略: 事不过三(最多{MAX_RETRY}次) + 两阶段分离")
+print(f"重试策略: 无(查询即计费，失败直接返回)")
 print()
 
 
-# ========== Phase 1: API调用(含翻页) ==========
+# ========== Phase 1: API调用(含翻页,无重试) ==========
 
 def call_api_page(keyword, page_num):
     """调用单页API"""
@@ -51,24 +51,42 @@ def call_api_page(keyword, page_num):
 def call_api_all_pages(keyword):
     """
     循环翻页拉取所有数据，合并为完整响应
-    返回合并后的完整API响应（error_code=0时包含所有items）
+    查询即计费：失败不重试，但翻页正常拉取(每一页是单独计费调用)
     """
-    first_page = call_api_page(keyword, 1)
-    error_code = first_page.get('error_code', -1)
+    try:
+        first_page = call_api_page(keyword, 1)
+    except requests.RequestException as e:
+        error_detail = {
+            'error_type': 'HTTP_EXCEPTION', 'error_code': -1,
+            'error_msg': str(e), 'traceback': traceback.format_exc()
+        }
+        print(f"[EXCEPTION] 第1页HTTP请求失败: {e}")
+        return ('FAILED', (-1, error_detail))
+    except Exception as e:
+        error_detail = {
+            'error_type': 'OTHER_EXCEPTION', 'error_code': -2,
+            'error_msg': str(e), 'traceback': traceback.format_exc()
+        }
+        print(f"[EXCEPTION] 第1页处理失败: {e}")
+        return ('FAILED', (-2, error_detail))
 
+    error_code = first_page.get('error_code', -1)
     if error_code != 0:
-        return first_page
+        error_msg = first_page.get('reason', '')
+        print(f"[FAILED] API返回错误({error_code}): {error_msg}")
+        return ('FAILED', (error_code, first_page))
 
     result = first_page.get('result')
     if not result:
-        return first_page
+        return ('SUCCESS', first_page)
 
     total = result.get('total', 0)
     all_items = result.get('items', [])
     print(f"[INFO] 总记录数: {total}, 第1页获取: {len(all_items)}条")
 
     if total <= PAGE_SIZE:
-        return first_page
+        print(f"[SUCCESS] API调用成功: {keyword} (total={total})")
+        return ('SUCCESS', first_page)
 
     total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
     print(f"[INFO] 需翻页: 共{total_pages}页")
@@ -89,43 +107,9 @@ def call_api_all_pages(keyword):
 
     merged_result = first_page.copy()
     merged_result['result'] = {'total': total, 'items': all_items}
-    return merged_result
-
-
-def call_api_with_retry(keyword):
-    """Phase 1: 事不过三重试(含翻页)，只管API调用，不管写入"""
-    last_error = None
-    for attempt in range(1, MAX_RETRY + 1):
-        print(f"[INFO] 第{attempt}次尝试(含翻页): {keyword}")
-        try:
-            api_result = call_api_all_pages(keyword)
-            error_code = api_result.get('error_code', -1)
-            if error_code == 0:
-                total = api_result.get('result', {}).get('total', 0)
-                items_count = len(api_result.get('result', {}).get('items', []))
-                print(f"[SUCCESS] API调用成功: {keyword} (total={total}, 实际获取={items_count}条)")
-                return ('SUCCESS', api_result)
-            else:
-                error_msg = api_result.get('reason', '')
-                print(f"[FAILED] API返回错误({error_code}): {error_msg}")
-                last_error = (error_code, api_result)
-        except requests.RequestException as e:
-            error_detail = {
-                'error_type': 'HTTP_EXCEPTION', 'error_code': -1,
-                'error_msg': str(e), 'traceback': traceback.format_exc()
-            }
-            print(f"[EXCEPTION] HTTP请求失败: {e}")
-            last_error = (-1, error_detail)
-        except Exception as e:
-            error_detail = {
-                'error_type': 'OTHER_EXCEPTION', 'error_code': -2,
-                'error_msg': str(e), 'traceback': traceback.format_exc()
-            }
-            print(f"[EXCEPTION] 处理失败: {e}")
-            last_error = (-2, error_detail)
-
-    print(f"[FAILED] 已达最大重试次数({MAX_RETRY})，放弃: {keyword}")
-    return ('FAILED', last_error)
+    items_count = len(all_items)
+    print(f"[SUCCESS] API调用成功: {keyword} (total={total}, 实际获取={items_count}条)")
+    return ('SUCCESS', merged_result)
 
 
 # ========== Phase 2: Delta写入 ==========
@@ -158,26 +142,26 @@ def write_failure_record(keyword, error_info):
 # ========== 两阶段编排 ==========
 
 def process_company(keyword):
-    """两阶段编排: Phase1(API翻页重试) → Phase2(Delta写入,失败即终止)"""
+    """两阶段编排: Phase1(API调用,无重试) → Phase2(Delta写入,失败即终止)"""
     if has_success_today(spark, INTERFACE_NAME, keyword, dt):
         print(f"[SKIP] 当天已有成功记录，跳过: {keyword}")
         return 'SKIP_SUCCESS'
 
-    status, result = call_api_with_retry(keyword)
+    status, result = call_api_all_pages(keyword)
 
     if status == 'SUCCESS':
         try:
             write_success_record(keyword, result)
         except Exception as e:
             print(f"[FATAL] Delta写入失败(成功记录): {keyword} - {e}")
-            raise  # 不重试，直接终止，节省API配额
+            raise
         return 'SUCCESS'
     else:
         try:
             write_failure_record(keyword, result)
         except Exception as e:
             print(f"[FATAL] Delta写入失败(失败记录): {keyword} - {e}")
-            raise  # 不重试，直接终止
+            raise
         return 'FAILED'
 
 
