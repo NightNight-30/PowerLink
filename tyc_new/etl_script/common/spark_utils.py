@@ -214,11 +214,20 @@ def write_target_data(spark, parsed_rows: List[Dict], table_name: str, dt: str,
     # 创建DataFrame - 只保留schema中定义的列
     filtered_rows = []
     schema_fields = [f.name for f in target_schema.fields]
+    # 需要类型转换的字段: DECIMAL类型需要将Python值转为Decimal对象
+    decimal_fields = {f.name for f in target_schema.fields if 'DecimalType' in str(f.dataType)}
     for row in parsed_rows:
         filtered_row = {}
         for k, v in row.items():
             if k in schema_fields:
-                filtered_row[k] = v
+                if k in decimal_fields and v is not None:
+                    from decimal import Decimal
+                    try:
+                        filtered_row[k] = Decimal(str(v))
+                    except:
+                        filtered_row[k] = None
+                else:
+                    filtered_row[k] = v
         filtered_rows.append(filtered_row)
 
     new_df = spark.createDataFrame(filtered_rows, schema=target_schema)

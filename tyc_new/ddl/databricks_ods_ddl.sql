@@ -242,7 +242,33 @@ PARTITIONED BY (dt STRING)
 LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_967_df'
 COMMENT '主要指标-年度(967接口,ODS层)';
 
--- 9. 法律诉讼表 (1114接口, 1:N)
+-- 9. 欠税公告表 (851接口, 1:N)
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_851_df (
+  api_record_id       BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
+  data_create_time    TIMESTAMP     COMMENT '数据创建时间',
+  company_name        STRING        COMMENT '主公司名(搜索关键字/入参)',
+  total               INT           COMMENT '欠税记录总数(result.total)',
+  tax_id_number       STRING        COMMENT '纳税人识别号(result.items[].taxIdNumber)',
+  new_own_tax_balance STRING        COMMENT '新欠税余额(result.items[].newOwnTaxBalance)',
+  own_tax_amount      STRING        COMMENT '欠税金额(result.items[].ownTaxAmount)',
+  publish_date        STRING        COMMENT '发布日期(result.items[].publishDate)',
+  own_tax_balance     STRING        COMMENT '欠税余额(result.items[].ownTaxBalance)',
+  type                STRING        COMMENT '类型(地税/国税)(result.items[].type)',
+  person_id_number    STRING        COMMENT '个人身份证号(result.items[].personIdNumber)',
+  tax_category        STRING        COMMENT '欠税税种(result.items[].taxCategory)',
+  taxpayer_type       STRING        COMMENT '纳税人类型(result.items[].taxpayerType)',
+  person_id_name      STRING        COMMENT '个人证件名称(result.items[].personIdName)',
+  taxpayer_name       STRING        COMMENT '纳税人名称(result.items[].name)',
+  location            STRING        COMMENT '地址(result.items[].location)',
+  department          STRING        COMMENT '税务机关(result.items[].department)',
+  reg_type            STRING        COMMENT '登记类型(result.items[].regType)',
+  legal_person_name   STRING        COMMENT '法定代表人(result.items[].legalpersonName)'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_851_df'
+COMMENT '欠税公告(851接口,ODS层)';
+
+-- 10. 法律诉讼表 (1114接口, 1:N)
 CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_1114_df (
   api_record_id     BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time  TIMESTAMP     COMMENT '数据创建时间',
@@ -279,7 +305,7 @@ PARTITIONED BY (dt STRING)
 LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_1114_df'
 COMMENT '法律诉讼(1114接口,ODS层)';
 
--- 10. 现金流量表 (973接口, 1:N)
+-- 11. 现金流量表 (973接口, 1:N)
 CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_973_df (
   api_record_id               BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time            TIMESTAMP     COMMENT '数据创建时间',
@@ -326,7 +352,7 @@ PARTITIONED BY (dt STRING)
 LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_973_df'
 COMMENT '现金流量表(973接口,ODS层)';
 
--- 11. 付款指数表 (邓白氏P51060接口, 1:1)
+-- 12. 付款指数表 (邓白氏P51060接口, 1:1)
 CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_dnb_P51060_df (
   api_record_id                 BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time              TIMESTAMP     COMMENT '数据创建时间',

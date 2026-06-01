@@ -5,6 +5,7 @@
   },
   "apis": {
     "819":   { "name": "企业基本信息（含主要人员）", "url": "http://open.api.tianyancha.com/services/open/ic/baseinfoV3/2.0", "provider": "tyc", "timeout": 30 },
+    "851":   { "name": "欠税公告",                 "url": "http://open.api.tianyancha.com/services/open/mr/ownTax/2.0", "provider": "tyc", "timeout": 30 },
     "1058":  { "name": "企业天眼风险",             "url": "http://open.api.tianyancha.com/services/open/risk/baseinfo/2.0", "provider": "tyc", "timeout": 30 },
     "822":   { "name": "变更记录",                 "url": "http://open.api.tianyancha.com/services/open/ic/changeinfo/2.0", "provider": "tyc", "timeout": 30 },
     "854":   { "name": "上市公司企业简介",           "url": "http://open.api.tianyancha.com/services/open/stock/baseinfo/2.0", "provider": "tyc", "timeout": 30 },
