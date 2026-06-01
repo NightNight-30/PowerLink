@@ -30,21 +30,38 @@ from pyspark.sql.functions import monotonically_increasing_id, current_timestamp
 CATALOG = 'powerlink'
 SCHEMA = 'pw_ods'
 CUSTOMER_TABLE = f'{CATALOG}.pw_ads.ads_customer_wide_tab_tmp_df'
-API_RECORD_TABLE = f'{CATALOG}.{SCHEMA}.ods_api_call_record_df'
 
 MAX_RETRY = 3
 
 
-# ========== Schema定义 ==========
+# ========== 表名映射 ==========
 
-# write_api_records从Delta表动态读取schema，不再需要硬编码schema
-# get_api_call_record_schema()已移除（硬编码类型与DDL不一致会导致schema冲突）
+def get_api_record_table(interface_key: str) -> str:
+    """接口号 → 各接口独立的API调用记录表 (并发安全，各Task写不同表)"""
+    record_map = {
+        '819':   'ods_api_call_record_819_df',
+        '851':   'ods_api_call_record_851_df',
+        '1058':  'ods_api_call_record_1058_df',
+        '822':   'ods_api_call_record_822_df',
+        '854':   'ods_api_call_record_854_df',
+        '1168':  'ods_api_call_record_1168_df',
+        '1149':  'ods_api_call_record_1149_df',
+        '967':   'ods_api_call_record_967_df',
+        '1114':  'ods_api_call_record_1114_df',
+        '973':   'ods_api_call_record_973_df',
+        'P51060': 'ods_api_call_record_P51060_df',
+    }
+    table_name = record_map.get(interface_key)
+    if not table_name:
+        raise ValueError(f"未知接口号: {interface_key}")
+    return f'{CATALOG}.{SCHEMA}.{table_name}'
 
 
 def get_target_table_name(interface_key: str) -> str:
     """接口号 → 目标Delta表全名 (格式: ods_{接口类型}_{接口id}_df)"""
     name_map = {
         '819':   'ods_tyc_819_df',
+        '851':   'ods_tyc_851_df',
         '1058':  'ods_tyc_1058_df',
         '822':   'ods_tyc_822_df',
         '854':   'ods_tyc_854_df',
@@ -104,44 +121,44 @@ def get_company_list(spark, specific_company: str = None) -> List[str]:
 
 # ========== 幂等检查 ==========
 
-def has_success_today(spark, interface_name: str, keyword: str, dt: str) -> bool:
-    """检查当天是否已有成功调用记录（status_code=0）"""
+def has_success_today(spark, keyword: str, dt: str, interface_key: str) -> bool:
+    """检查当天是否已有成功调用记录（status_code=0），使用各接口独立的调用记录表"""
+    table = get_api_record_table(interface_key)
     result = spark.sql(
-        f"SELECT COUNT(*) FROM {API_RECORD_TABLE} "
-        f"WHERE dt = '{dt}' AND interface_name = '{interface_name}' "
-        f"AND input_param = '{keyword}' AND status_code = 0"
+        f"SELECT COUNT(*) FROM {table} "
+        f"WHERE dt = '{dt}' AND input_param = '{keyword}' AND status_code = 0"
     ).collect()[0][0]
     return result > 0
 
 
 # ========== Delta写操作 ==========
 
-def write_api_records(spark, records: List[Dict], dt: str):
+def write_api_records(spark, records: List[Dict], dt: str, interface_key: str):
     """
-    将API调用记录写入ods_api_call_record_df (append模式)
-    写入前删除同公司同接口同dt的旧记录，确保每天每公司只保留1条最终记录
+    将API调用记录写入各接口独立的调用记录表 (并发安全)
+    写入前删除同公司同dt的旧记录，确保每天每公司只保留1条最终记录
     从Delta表读取schema，避免硬编码类型不匹配
-    自动添加id(monotonically_increasing_id)和create_time(current_timestamp)
+    自动添加id(MAX(id)+1自增)和create_time
     """
     if not records:
         print("[INFO] 无新记录需要写入")
         return
 
+    table = get_api_record_table(interface_key)
+
     for rec in records:
         rec['dt'] = dt
 
-    # 删除旧记录: 同公司+同接口+同dt，避免重试产生冗余数据
+    # 删除旧记录: 同公司+同dt（各接口独立表，无需interface_name条件）
     for rec in records:
-        interface_name = rec.get('interface_name', '')
         input_param = rec.get('input_param', '')
-        if interface_name and input_param:
+        if input_param:
             spark.sql(
-                f"DELETE FROM {API_RECORD_TABLE} "
-                f"WHERE dt = '{dt}' AND interface_name = '{interface_name}' "
-                f"AND input_param = '{input_param}'"
+                f"DELETE FROM {table} "
+                f"WHERE dt = '{dt}' AND input_param = '{input_param}'"
             )
 
-    table_schema = spark.table(API_RECORD_TABLE).schema
+    table_schema = spark.table(table).schema
     schema_field_names = {f.name for f in table_schema.fields}
 
     filtered_records = []
@@ -150,7 +167,7 @@ def write_api_records(spark, records: List[Dict], dt: str):
         filtered_records.append(filtered_rec)
 
     # 生成唯一id: 当前表最大id + 递增偏移
-    max_id_result = spark.sql(f"SELECT COALESCE(MAX(id), -1) FROM {API_RECORD_TABLE}").collect()[0][0]
+    max_id_result = spark.sql(f"SELECT COALESCE(MAX(id), -1) FROM {table}").collect()[0][0]
     start_id = max_id_result + 1
     for i, rec in enumerate(filtered_records):
         rec['id'] = start_id + i
@@ -162,8 +179,8 @@ def write_api_records(spark, records: List[Dict], dt: str):
     df = spark.createDataFrame(filtered_records, schema=create_schema)
     df = df.select(*[f.name for f in table_schema.fields])
 
-    df.write.mode("append").format("delta").saveAsTable(API_RECORD_TABLE)
-    print(f"[INFO] 写入API调用记录: {len(records)}条 (dt={dt}, id从{start_id}起)")
+    df.write.mode("append").format("delta").saveAsTable(table)
+    print(f"[INFO] 写入API调用记录: {len(records)}条 (dt={dt}, id从{start_id}起, 表={table})")
 
 
 def write_target_data(spark, parsed_rows: List[Dict], table_name: str, dt: str,
@@ -263,28 +280,25 @@ def write_target_data(spark, parsed_rows: List[Dict], table_name: str, dt: str,
 
 # ========== Step2: 读取成功记录 ==========
 
-def get_today_success_records(spark, interface_name: str, dt: str,
-                              company_name: str = None,
-                              use_main_company_name: bool = False) -> List[Dict]:
+def get_today_success_records(spark, dt: str, interface_key: str,
+                              company_name: str = None) -> List[Dict]:
     """
-    从ods_api_call_record_df读取当天成功记录并去重
+    从各接口独立的调用记录表读取当天成功记录并去重
     每个公司取create_time最近的一条，同时带出id和output_result
-
-    use_main_company_name: 1058接口用main_company_name字段名
     """
+    table = get_api_record_table(interface_key)
+
     if company_name:
         sql = f"""
         SELECT id, input_param, output_result, create_time
-        FROM {API_RECORD_TABLE}
+        FROM {table}
         WHERE dt = '{dt}'
-          AND interface_name = '{interface_name}'
           AND input_param = '{company_name}'
           AND status_code = 0
           AND create_time = (
             SELECT MAX(create_time)
-            FROM {API_RECORD_TABLE} r2
+            FROM {table} r2
             WHERE r2.dt = '{dt}'
-              AND r2.interface_name = '{interface_name}'
               AND r2.input_param = '{company_name}'
               AND r2.status_code = 0
           )
@@ -292,17 +306,15 @@ def get_today_success_records(spark, interface_name: str, dt: str,
     else:
         sql = f"""
         SELECT r.id, r.input_param, r.output_result, r.create_time
-        FROM {API_RECORD_TABLE} r
+        FROM {table} r
         INNER JOIN (
             SELECT input_param, MAX(create_time) as max_ct
-            FROM {API_RECORD_TABLE}
+            FROM {table}
             WHERE dt = '{dt}'
-              AND interface_name = '{interface_name}'
               AND status_code = 0
             GROUP BY input_param
         ) t ON r.input_param = t.input_param AND r.create_time = t.max_ct
         WHERE r.dt = '{dt}'
-          AND r.interface_name = '{interface_name}'
           AND r.status_code = 0
         ORDER BY r.input_param
         """
@@ -316,7 +328,7 @@ def get_today_success_records(spark, interface_name: str, dt: str,
             'output_result_str': row.output_result,
             'create_time': row.create_time,
         })
-    print(f"[INFO] 从api_call_record读取到 {len(records)} 条去重后的成功记录")
+    print(f"[INFO] 从api_call_record读取到 {len(records)} 条去重后的成功记录 (表={table})")
     return records
 
 

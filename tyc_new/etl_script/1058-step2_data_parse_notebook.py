@@ -89,7 +89,7 @@ print(f"分区dt: {dt}")
 print(f"目标表: {table_name}")
 print()
 
-records = get_today_success_records(spark, INTERFACE_NAME, dt, company_name=target_company)
+records = get_today_success_records(spark, dt, INTERFACE_KEY, company_name=target_company)
 
 if not records:
     print("[WARNING] 没有找到可解析的数据")

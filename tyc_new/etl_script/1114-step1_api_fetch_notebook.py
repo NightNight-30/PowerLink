@@ -123,7 +123,7 @@ def write_success_record(keyword, api_result):
         'status_code': 0,
         'output_result': json.dumps(api_result, ensure_ascii=False),
     }
-    write_api_records(spark, [record], dt)
+    write_api_records(spark, [record], dt, INTERFACE_KEY)
 
 
 def write_failure_record(keyword, error_info):
@@ -136,14 +136,14 @@ def write_failure_record(keyword, error_info):
         'status_code': error_info[0],
         'output_result': json.dumps(error_output, ensure_ascii=False),
     }
-    write_api_records(spark, [record], dt)
+    write_api_records(spark, [record], dt, INTERFACE_KEY)
 
 
 # ========== 两阶段编排 ==========
 
 def process_company(keyword):
     """两阶段编排: Phase1(API调用,无重试) → Phase2(Delta写入,失败即终止)"""
-    if has_success_today(spark, INTERFACE_NAME, keyword, dt):
+    if has_success_today(spark, keyword, dt, INTERFACE_KEY):
         print(f"[SKIP] 当天已有成功记录，跳过: {keyword}")
         return 'SKIP_SUCCESS'
 

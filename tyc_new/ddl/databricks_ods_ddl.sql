@@ -6,11 +6,13 @@
 -- 去除: AUTO_INCREMENT, PRIMARY KEY, UNIQUE KEY, INDEX, ENGINE
 -- ============================================
 
--- 1. 接口调用记录表 (所有接口共享)
--- id由Spark monotonically_increasing_id()生成，无AUTO_INCREMENT
-CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_df (
-  id              BIGINT        COMMENT '记录ID(Spark生成)',
-  interface_name  STRING        COMMENT '接口名，如企业基本信息（含主要人员）/变更记录/P51060等',
+-- 1. 接口调用记录表 (各接口独立，并发安全)
+-- id由Spark MAX(id)+1自增生成，各接口写不同表无冲突
+-- 原共享表ods_api_call_record_df保留(历史数据)，新数据写入各接口独立表
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_819_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:企业基本信息（含主要人员）)',
   call_datetime   TIMESTAMP     COMMENT '调用日期时间',
   input_param     STRING        COMMENT '入参，公司名',
   status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
@@ -18,8 +20,138 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_df (
   create_time     TIMESTAMP     COMMENT '创建时间'
 ) USING DELTA
 PARTITIONED BY (dt STRING)
-LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_df'
-COMMENT '三方接口调用记录表(ODS层)';
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_819_df'
+COMMENT '819接口调用记录表(ODS层,并发安全)';
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_851_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:欠税公告)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_851_df'
+COMMENT '851接口调用记录表(ODS层,并发安全)';
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_1058_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:企业天眼风险)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_1058_df'
+COMMENT '1058接口调用记录表(ODS层,并发安全)';
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_822_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:变更记录)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_822_df'
+COMMENT '822接口调用记录表(ODS层,并发安全)';
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_854_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:上市公司企业简介)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_854_df'
+COMMENT '854接口调用记录表(ODS层,并发安全)';
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_1168_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:组织机构)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_1168_df'
+COMMENT '1168接口调用记录表(ODS层,并发安全)';
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_1149_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:企业规模)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_1149_df'
+COMMENT '1149接口调用记录表(ODS层,并发安全)';
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_967_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:主要指标-年度)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_967_df'
+COMMENT '967接口调用记录表(ODS层,并发安全)';
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_1114_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:法律诉讼)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_1114_df'
+COMMENT '1114接口调用记录表(ODS层,并发安全)';
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_973_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:现金流量表)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_973_df'
+COMMENT '973接口调用记录表(ODS层,并发安全)';
+
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_P51060_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:付款指数（PAYDEX®）)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_P51060_df'
+COMMENT 'P51060接口调用记录表(ODS层,并发安全)';
 
 -- 2. 企业基本信息表 (819接口)
 CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_819_df (
