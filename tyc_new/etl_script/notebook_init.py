@@ -15,7 +15,7 @@ Databricks Notebook初始化脚本
 
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ========== 1. 设置common模块路径 ==========
 
@@ -53,13 +53,13 @@ from common.config_loader import load_config, get_interface_name, get_api_config
 from common.spark_utils import (
     get_spark, get_company_list, has_success_today,
     write_api_records, get_today_success_records, write_target_data,
-    get_target_table_name, get_uscc,
+    get_target_table_name, get_api_record_table, get_uscc,
     camel_to_snake, timestamp_to_datetime, array_to_string, null_if_empty,
-    CATALOG, SCHEMA, API_RECORD_TABLE, MAX_RETRY
+    CATALOG, SCHEMA, MAX_RETRY
 )
 
 print("[INIT] 公共模块导入完成")
-print(f"[INIT] dt={datetime.now().strftime('%Y%m%d')}")
+print(f"[INIT] dt={(datetime.now() - timedelta(days=1)).strftime('%Y%m%d')}")
 
 # ========== 4. 环境信息 ==========
 
@@ -67,4 +67,4 @@ print(f"运行环境:")
 print(f"  Spark版本: {spark.version}")
 print(f"  Catalog: {CATALOG}")
 print(f"  Schema: {SCHEMA}")
-print(f"  API记录表: {API_RECORD_TABLE}")
+print(f"  API记录表: 各接口独立表(并发安全), 通过get_api_record_table(interface_key)获取")
