@@ -18,6 +18,9 @@
 | 写入方式 | INSERT / ON DUPLICATE KEY UPDATE | 动态分区覆盖(overwrite) |
 | Schema | 硬编码Schema定义 | 从Delta表动态读取schema |
 | 并发安全 | 无 | ⭐ 各接口独立表，11个Task零冲突 |
+| 预警邮件 | 无 | ⭐ tesa品牌UI + Graph API发送 |
+| 频次控制 | 无 | ⭐ daily/monthly双频次 + 预付款过滤 |
+| 计费区分 | 无 | ⭐ 查询即计费/不计费分类 |
 
 ## 核心设计
 
@@ -66,6 +69,41 @@ P51060不需要等819完成（entityName单独也能调用DNB接口）
 | ⭐ 查询即计费 | **不重试，失败直接返回** | 1168, 1114, 851 |
 | 邓白氏 | 事不过三(最多3次) | P51060 |
 
+### 预警邮件系统(tesa品牌UI)
+
+Databricks Jobs新增Task: 所有step1完成后运行 `daily_call_analysis_alert_notebook.py`
+
+**功能**:
+- 读取11个接口独立调用记录表，按status_code分组统计
+- 区分成功(0)/正常失败(normal_error_codes)/异常失败(其他)
+- 实际数据优先: 有调用数据的接口显示真实状态，无数据看配置预测
+- 调用次数按计费规则: 查询即计费(1168/1114/851)=总调用, 查询不计费(其余)=成功数
+- 生成tesa品牌UI的HTML邮件，通过Microsoft Graph API发送
+
+**tesa品牌设计规范**:
+- 配色: 红(#E3000F)/蓝(#009fdf)/煤灰(#373737)/深灰(#5E5E5E)层级
+- 页首尾品牌栏: 红66% + 白2%间隙 + 蓝32%，6px高
+- Header: Power Link徽章(红蓝白三色) + tesa logo
+- 表头煤灰背景白字，标题蓝色+煤灰底线，异常红色高亮
+
+**邮件发送**:
+- 方式: Microsoft Graph API (OAuth2 client_credentials)
+- 原因: smtp.tesa.com(DNS不可达) + smtp.office365.com(SMTP AUTH禁用535 5.7.139)
+- 需配置: Azure AD app注册 + Mail.Send权限 + tenant_id/client_id/client_secret
+
+### 接口频次+预付款过滤
+
+config.json新增双开关控制各接口运行策略:
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| frequency | 调用频次(daily/monthly) | 819=daily, 851=monthly |
+| prepaid_filter | 预付款客户过滤 | true=启用, false=不过滤 |
+| charge_per_query | 查询即计费 | 1168/1114/851=true, 其余=false |
+| normal_error_codes | 正常错误码(不计入预警) | tyc=[300000], dnb=[1,1021,2001] |
+
+过滤逻辑: prepaid_filter=true的接口，月度跑批日处理全部客户(含预付款)，非月度跑批日仅处理非预付款客户
+
 ## 表名格式
 
 **调用记录表**: `powerlink.pw_ods.ods_api_call_record_{接口id}_df`
@@ -90,16 +128,18 @@ P51060不需要等819完成（entityName单独也能调用DNB接口）
 ```
 tyc_new/
 ├── config/
-│   └── config.json.example          # 配置模板
+│   ├── config.json.example          # 配置模板(含频次/计费/预警)
+│   └── tesa_logo.png               # tesa品牌logo资源
 ├── ddl/
 │   ├── databricks_ods_ddl.sql       # 所有DDL(11个独立调用记录表+11个目标表)
 │   └── migrate_api_call_record.sql  # 历史数据迁移DML(共享表→独立表)
 ├── etl_script/
 │   ├── common/
 │   │   ├── __init__.py
-│   │   ├── config_loader.py         # 配置加载(Unity Catalog Volume)
+│   │   ├── config_loader.py         # ⭐配置加载(频次/计费/预警/错误码描述)
 │   │   └── spark_utils.py           # ⭐核心(独立表映射+动态schema+去重写入+id自增)
 │   ├── notebook_init.py             # Notebook初始化cell
+│   ├── daily_call_analysis_alert_notebook.py  # ⭐预警邮件(tesa品牌UI+Graph API)
 │   ├── diagnostic_test.py           # 环境诊断测试
 │   ├── 819-step1/2_*.py             # 企业基本信息
 │   ├── 851-step1/2_*.py             # 欠税公告(含翻页,查询即计费)
@@ -142,7 +182,13 @@ MANAGED LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods';
 CREATE VOLUME IF NOT EXISTS powerlink.default.env;
 ```
 
-上传config.json到 `/Volumes/powerlink/default/env/config.json`
+上传以下文件到 `/Volumes/powerlink/default/env/`:
+- `config.json` — 主配置(含频次/计费/预警/错误码描述)
+- `tesa_logo.png` — tesa品牌logo(预警邮件嵌入)
+
+config.json参考 `config/config.json.example`，需填入:
+- providers: tyc token, dnb client_key/client_secret
+- alert: Azure AD tenant_id/client_id/client_secret (Graph API发送)
 
 ### 3. 上传脚本到Workspace
 
@@ -150,9 +196,11 @@ CREATE VOLUME IF NOT EXISTS powerlink.default.env;
 
 ### 4. 创建Databricks Jobs
 
-编排方式: init Task → 11个fetch Task并行 → 各parse Task依赖对应fetch
+编排方式: init Task → 11个step1 Task并行 → 各step2 Task依赖对应step1 → 预警Task依赖所有step1完成
 
 每个Task对应一个Notebook（2个cell: Cell1=notebook_init, Cell2=对应step脚本）
+
+预警Task: Cell1=notebook_init, Cell2=daily_call_analysis_alert_notebook.py，依赖所有step1
 
 ### 5. 历史数据迁移（如需）
 
@@ -174,5 +222,8 @@ CREATE VOLUME IF NOT EXISTS powerlink.default.env;
 6. **查询即计费**: 1168/1114/851失败不重试，直接返回
 7. **翻页接口**: 1114/851循环翻页合并存储，翻页失败保留已获取数据
 8. **邓白氏uscc**: 从ods_tyc_819_df读取social_credit_code，首次运行无uscc时仅用entityName
+9. **频次+预付款过滤**: daily/monthly双频次 + 预付款客户月度跑批日才处理
+10. **预警邮件**: tesa品牌UI(红蓝煤灰层级) + Graph API发送 + 正常/异常错误码区分
+11. **调用次数**: 查询即计费=总调用, 查询不计费=成功数
 
 详细方法论见Obsidian文档 `claude变更记录/天眼查数据接入方法论.md`
