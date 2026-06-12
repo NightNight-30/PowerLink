@@ -70,6 +70,6 @@
     "from_addr": "Powerlink.GC@tesa.com",
     "to_addr": ["<BUSINESS_PERSON_1_EMAIL>", "<BUSINESS_PERSON_2_EMAIL>"],
     "subject_prefix": "【外部数据预警】",
-    "logo_path": "/Volumes/powerlink/default/env/tesa_logo.png"
+    "logo_path": "/Workspace/Shared/powerlink_warehouse/tyc_new/config/tesa_logo.png"
   }
 }

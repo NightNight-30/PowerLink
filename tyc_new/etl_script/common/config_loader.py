@@ -3,8 +3,8 @@
 """
 配置加载模块 - Databricks版本
 
-从Unity Catalog Volume读取config.json:
-  - 默认路径: /Volumes/powerlink/default/env/config.json
+从Workspace读取config.json:
+  - 默认路径: /Workspace/Shared/powerlink_warehouse/tyc_new/config/config.json
   - 环境变量 TYC_CONFIG_PATH 可覆盖
 
 新增:
@@ -25,7 +25,7 @@ from typing import Dict, List
 
 CONFIG_PATH = os.environ.get(
     'TYC_CONFIG_PATH',
-    '/Volumes/powerlink/default/env/config.json'
+    '/Workspace/Shared/powerlink_warehouse/tyc_new/config/config.json'
 )
 
 

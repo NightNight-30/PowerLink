@@ -48,7 +48,7 @@ try:
     print(f"  apis: {list(config.get('apis', {}).keys())}")
 except Exception as e:
     print(f"[FAIL] 配置文件加载失败: {e}")
-    print("  -> 确认config.json已上传到 /Volumes/powerlink/default/env/config.json")
+    print("  -> 确认config.json已上传到 /Workspace/Shared/powerlink_warehouse/tyc_new/config/config.json")
 
 # ========== 测试3: SparkSession ==========
 print("\n[测试3] SparkSession...")
