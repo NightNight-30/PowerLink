@@ -127,6 +127,19 @@ PARTITIONED BY (dt STRING)
 LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_1114_df'
 COMMENT '1114接口调用记录表(ODS层,并发安全)';
 
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_1041_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:司法解析)',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_1041_df'
+COMMENT '1041接口调用记录表(ODS层,并发安全)';
+
 CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_973_df (
   id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
   interface_name  STRING        COMMENT '接口名(固定值:现金流量表)',
@@ -437,7 +450,26 @@ PARTITIONED BY (dt STRING)
 LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_1114_df'
 COMMENT '法律诉讼(1114接口,ODS层)';
 
--- 11. 现金流量表 (973接口, 1:N)
+-- 11. 司法解析表 (1041接口, 1:N)
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_1041_df (
+  api_record_id     BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
+  data_create_time  TIMESTAMP     COMMENT '数据创建时间',
+  company_name      STRING        COMMENT '主公司名(搜索关键字/入参)',
+  total             INT           COMMENT '司法案件总数(result.total)',
+  case_code         STRING        COMMENT '案号(items[].caseCode)',
+  trial_time        STRING        COMMENT '当前审理程序日期(items[].trialTime)',
+  case_identity     STRING        COMMENT '案件身份(items[].caseIdentity,逗号分隔)',
+  case_title        STRING        COMMENT '案件名称(items[].caseTitle)',
+  uuid              STRING        COMMENT 'UUID(items[].uuid)',
+  trial_procedure   STRING        COMMENT '当前审理程序(items[].trialProcedure)',
+  case_reason       STRING        COMMENT '案由(items[].caseReason)',
+  case_type         STRING        COMMENT '案件类型(items[].caseType)'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_1041_df'
+COMMENT '司法解析(1041接口,ODS层)';
+
+-- 12. 现金流量表 (973接口, 1:N)
 CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_973_df (
   api_record_id               BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
   data_create_time            TIMESTAMP     COMMENT '数据创建时间',

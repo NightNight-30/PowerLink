@@ -29,7 +29,7 @@ from pyspark.sql.functions import monotonically_increasing_id, current_timestamp
 
 CATALOG = 'powerlink'
 SCHEMA = 'pw_ods'
-CUSTOMER_TABLE = f'{CATALOG}.pw_ads.ads_customer_wide_tab_tmp_df'
+CUSTOMER_TABLE = f'{CATALOG}.pw_ods.ods_credit_api_input_company_df'
 
 MAX_RETRY = 3
 
@@ -48,6 +48,7 @@ def get_api_record_table(interface_key: str) -> str:
         '1149':  'ods_api_call_record_1149_df',
         '967':   'ods_api_call_record_967_df',
         '1114':  'ods_api_call_record_1114_df',
+        '1041':  'ods_api_call_record_1041_df',
         '973':   'ods_api_call_record_973_df',
         'P51060': 'ods_api_call_record_P51060_df',
     }
@@ -69,6 +70,7 @@ def get_target_table_name(interface_key: str) -> str:
         '1149':  'ods_tyc_1149_df',
         '967':   'ods_tyc_967_df',
         '1114':  'ods_tyc_1114_df',
+        '1041':  'ods_tyc_1041_df',
         '973':   'ods_tyc_973_df',
         'P51060': 'ods_dnb_P51060_df',
     }
@@ -94,10 +96,15 @@ def get_spark() -> SparkSession:
 
 # ========== 客户公司列表 ==========
 
-def get_company_list(spark, specific_company: str = None) -> List[str]:
+def get_company_list(spark, specific_company: str = None, prepaid_filter: bool = False, monthly_day: int = 5) -> List[str]:
     """
     从ads_customer_wide_tab_tmp_df读取公司列表
     优先读取最新dt分区，取distinct name
+
+    prepaid_filter=True时:
+      月度跑批日期(monthly_day): 处理全部客户(含预付款)
+      非月度跑批日期: 仅处理非预付款客户(is_prepaid=False)
+    prepaid_filter=False时: 不过滤，处理全部客户
     """
     if specific_company:
         return [specific_company]
@@ -111,9 +118,20 @@ def get_company_list(spark, specific_company: str = None) -> List[str]:
         print("[WARNING] 客户表无数据，任务结束")
         return []
 
-    df = spark.sql(
-        f"SELECT DISTINCT name FROM {CUSTOMER_TABLE} WHERE dt = '{latest_dt}' AND name IS NOT NULL AND name != ''"
+    base_sql = (
+        f"SELECT DISTINCT name FROM {CUSTOMER_TABLE} "
+        f"WHERE dt = '{latest_dt}' AND name IS NOT NULL AND name != ''"
     )
+
+    if prepaid_filter:
+        today = datetime.now().day
+        if today != monthly_day:
+            base_sql += " AND is_prepaid = '否'"
+            print(f"[INFO] 预付款过滤启用: 今天不是月度跑批日({monthly_day}号), 仅处理非预付款客户(is_prepaid='否')")
+        else:
+            print(f"[INFO] 预付款过滤启用: 今天是月度跑批日({monthly_day}号), 处理全部客户")
+
+    df = spark.sql(base_sql)
     companies = sorted([row.name for row in df.collect()])
     print(f"[INFO] 从客户表获取到 {len(companies)} 家公司 (dt={latest_dt})")
     return companies

@@ -91,7 +91,7 @@ def is_charge_per_query(config: Dict, interface_key: str) -> bool:
     判断接口是否为查询即计费模式
     charge_per_query=true → 查询即计费: 每次调用都扣费(含失败), 调用次数=总调用
     charge_per_query=false → 查询不计费: 只有成功才扣费, 调用次数=成功数
-    适用于: 1168/1114/851为查询即计费, 其余为查询不计费, P51060暂按不计费
+    适用于: 1168/1114/851/1041为查询即计费, 其余为查询不计费, P51060暂按不计费
     """
     api_config = get_api_config(config, interface_key)
     return api_config.get('charge_per_query', False)

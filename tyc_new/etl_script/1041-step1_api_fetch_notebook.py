@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""【Notebook版】天眼查1114接口 - API数据拉取(含翻页)
+"""【Notebook版】天眼查1041接口 - API数据拉取(司法解析,含翻页)
 核心改动: 查询即计费接口，失败不重试，直接返回失败记录(保留翻页逻辑)
 前置条件: Cell1已执行notebook_init
 
-1114接口支持翻页(pageNum/pageSize)，天眼查最多返回250页/5000条记录
+1041接口支持翻页(pageNum/pageSize)，天眼查最多返回250页/5000条记录
 翻页逻辑保留，但失败不重试
 """
 
@@ -12,7 +12,7 @@ from common.spark_utils import (get_spark, get_company_list, has_success_today, 
 import json, requests, traceback
 from datetime import datetime, timedelta
 
-INTERFACE_KEY = '1114'
+INTERFACE_KEY = '1041'
 PAGE_SIZE = 20
 MAX_PAGES = 250
 CONFIG = load_config()
