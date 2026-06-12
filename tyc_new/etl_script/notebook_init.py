@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 
 # 根据实际部署位置修改此路径
 # 方式1: 脚本上传到Workspace
-COMMON_PATH = "/Workspace/Shared/tyc_new/etl_script"
+COMMON_PATH = "/Workspace/Shared/powerlink_warehouse/tyc_new/etl_script"
 
 # 方式2: 脚本通过Repos(git)同步
 # COMMON_PATH = "/Repos/<user>/PowerLink/tyc_new/etl_script"
@@ -49,7 +49,7 @@ except NameError:
 
 # ========== 3. 导入公共模块 ==========
 
-from common.config_loader import load_config, get_interface_name, get_api_config, get_provider_config
+from common.config_loader import load_config, get_interface_name, get_api_config, get_provider_config, should_run_today, is_prepaid_filter_enabled, get_monthly_day, is_charge_per_query, get_normal_error_codes, get_error_code_desc, get_alert_config
 from common.spark_utils import (
     get_spark, get_company_list, has_success_today,
     write_api_records, get_today_success_records, write_target_data,
@@ -58,7 +58,7 @@ from common.spark_utils import (
     CATALOG, SCHEMA, MAX_RETRY
 )
 
-print("[INIT] 公共模块导入完成")
+print("[INIT] 公共模块导入完成(含频次/预付款过滤/预警配置)")
 print(f"[INIT] dt={(datetime.now() - timedelta(days=1)).strftime('%Y%m%d')}")
 
 # ========== 4. 环境信息 ==========
