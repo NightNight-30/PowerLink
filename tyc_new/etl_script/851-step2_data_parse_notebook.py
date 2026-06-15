@@ -36,7 +36,7 @@ def parse_tax_arrear_data(api_result, keyword, record_id):
         return []
 
     total = result.get('total')
-    items = result.get('items', [])
+    items = result.get('items') or []
 
     if not items:
         print(f"[INFO] 该公司无欠税记录: {keyword}")

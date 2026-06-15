@@ -35,7 +35,7 @@ def parse_change_data(api_result, keyword, record_id):
         return []
 
     total = result.get('total')
-    items = result.get('items', [])
+    items = result.get('items') or []
 
     if not items:
         print(f"[INFO] 该公司无变更记录: {keyword}")

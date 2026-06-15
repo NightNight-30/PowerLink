@@ -63,7 +63,7 @@ def parse_lawsuit_data(api_result, keyword, record_id):
         return []
 
     total = result.get('total')
-    items = result.get('items', [])
+    items = result.get('items') or []
 
     if not items:
         print(f"[INFO] 该公司无诉讼记录: {keyword}")
@@ -71,7 +71,7 @@ def parse_lawsuit_data(api_result, keyword, record_id):
 
     rows = []
     for item in items:
-        case_persons = item.get('casePersons', [])
+        case_persons = item.get('casePersons') or []
         person1 = case_persons[0] if len(case_persons) > 0 else None
         person2 = case_persons[1] if len(case_persons) > 1 else None
 

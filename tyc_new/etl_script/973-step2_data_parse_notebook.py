@@ -41,7 +41,7 @@ def parse_cash_flow_data(api_result, keyword, record_id):
         print(f"[WARNING] result字段为空，跳过: {keyword}")
         return []
 
-    cash_flow_list = result.get('corpCashFlow', [])
+    cash_flow_list = result.get('corpCashFlow') or []
     if not cash_flow_list:
         print(f"[INFO] 该公司无现金流量数据: {keyword}")
         return []

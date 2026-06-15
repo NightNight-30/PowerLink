@@ -30,11 +30,11 @@ def parse_org_type_data(api_result, keyword, record_id):
     """解析1168接口数据，返回一行记录"""
     result = api_result.get('result')
 
-    org_types = result.get('orgTypes', []) if result else []
+    org_types = (result.get('orgTypes') or []) if result else []
     org_level1_list = [item.get('level1', '') for item in org_types]
     org_level2_list = [item.get('level2', '') for item in org_types]
 
-    economy_types = result.get('economyTypes', []) if result else []
+    economy_types = (result.get('economyTypes') or []) if result else []
     economy_level1_list = [item.get('level1', '') for item in economy_types]
     economy_level2_list = [item.get('level2', '') for item in economy_types]
 

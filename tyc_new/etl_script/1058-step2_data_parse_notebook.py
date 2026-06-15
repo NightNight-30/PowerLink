@@ -36,7 +36,7 @@ def parse_risk_data(api_result, keyword, record_id):
         return []
 
     risk_level = null_if_empty(result.get('riskLevel'))
-    risk_list = result.get('riskList', [])
+    risk_list = result.get('riskList') or []
 
     if not risk_list:
         print(f"[INFO] 该公司无风险数据: {keyword}")
@@ -47,11 +47,11 @@ def parse_risk_data(api_result, keyword, record_id):
         count = risk_category.get('count')
         name = risk_category.get('name')
 
-        for risk_type_group in risk_category.get('list', []):
+        for risk_type_group in risk_category.get('list') or []:
             total = risk_type_group.get('total')
             tag = risk_type_group.get('tag')
 
-            for risk_item in risk_type_group.get('list', []):
+            for risk_item in risk_type_group.get('list') or []:
                 company_name_val = risk_item.get('companyName')
                 if company_name_val == '' or company_name_val is None:
                     company_name_val = None
