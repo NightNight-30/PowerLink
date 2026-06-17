@@ -1,530 +1,202 @@
 # PowerLink
 
-天眼查/邓白氏三方数据接入项目 — 从API拉取到本地MySQL存储的完整ETL流水线。
+天眼查/邓白氏三方数据接入项目 — Databricks (PySpark + Delta + Unity Catalog) 全流程ETL流水线。
+
+> 旧版MySQL脚本仍保留在 `etl_script/` 目录下作为参考，当前活跃版本为 `tyc_new/` (Databricks Notebook版)。
 
 ## 项目结构
 
 ```
 PowerLink/
-├── ddl/                    # 数据库建表DDL
-│   ├── api_call_record.sql
-│   ├── databricks_ods_ddl.sql
-│   └── gen_databricks_ods_ddl.py
-├── etl_script/             # ETL脚本（拉取+解析）
-│   ├── 819-step1_api_fetch.py
-│   ├── 819-step2_data_parse.py
-│   ├── 1058-step1_api_fetch.py
-│   ├── 1058-step2_data_parse.py
-│   ├── 822-step1_api_fetch.py
-│   ├── 822-step2_data_parse.py
-│   ├── 854-step1_api_fetch.py
-│   ├── 854-step2_data_parse.py
-│   ├── 1168-step1_api_fetch.py
-│   ├── 1168-step2_data_parse.py
-│   ├── 1149-step1_api_fetch.py
-│   ├── 1149-step2_data_parse.py
-│   ├── 967-step1_api_fetch.py
-│   ├── 967-step2_data_parse.py
-│   ├── 1114-step1_api_fetch.py
-│   ├── 1114-step2_data_parse.py
-│   ├── 973-step1_api_fetch.py
-│   └── 973-step2_data_parse.py
-│   ├── P51060-step1_api_fetch.py
-│   └── P51060-step2_data_parse.py
-├── config/                 # 配置文件
-│   └── config.json.example
-├── tools/                  # 辅助工具
-│   └── gen_data_dict.py
-└── README.md
+├── tyc_new/                          # ★ 当前活跃版本(Databricks)
+│   ├── config/
+│   │   ├── config.json.example       # 配置模板(频次/预付款/预警邮件)
+│   │   └── tesa_logo.png             # 预警邮件品牌logo
+│   ├── ddl/
+│   │   ├── databricks_ods_ddl.sql    # Delta ODS表DDL
+│   │   └ migrate_api_call_record.sql # 调用记录表DDL
+│   ├── etl_script/
+│   │   ├── common/
+│   │   │   ├── config_loader.py      # 配置加载+频次/预付款/月度跑批日判断
+│   │   │   └── spark_utils.py        # Spark/Delta通用工具+补充跑批检测
+│   │   ├── notebook_init.py          # Notebook初始化cell
+│   │   ├── diagnostic_test.py        # 环境诊断
+│   │   ├── daily_call_analysis_alert_notebook.py  # 调用分析预警邮件
+│   │   ├── {接口号}-step1_api_fetch_notebook.py   # 12个接口的API拉取
+│   │   └── {接口号}-step2_data_parse_notebook.py  # 12个接口的数据解析
+│   └── tools/
+│       ├── verify_schema.py          # 表结构验证
+│       ├── verify_data.py            # 数据质量验证
+│       └── verify_idempotency.py     # 幂等性验证
+│
+├── etl_script/                       # 旧版MySQL脚本(参考)
+├── ddl/                              # 旧版MySQL DDL(参考)
+├── config/                           # 旧版配置模板(参考)
+└── tools/                            # 旧版数据字典工具(参考)
 ```
 
 ## 接口总览
 
-| 接口 | 名称 | 数据关系 | 嵌套层级 | 入库方式 | 主公司名来源 |
-|:-----|:-----|:---------|:---------|:---------|:------------|
-| 819 | 企业基本信息（含主要人员） | 1:1 | 1层扁平 | ON DUPLICATE KEY UPDATE | API返回 |
-| 1058 | 企业天眼风险 | 1:N | 3层嵌套 | DELETE+INSERT | 搜索入参 |
-| 822 | 变更记录 | 1:N | 2层展平 | DELETE+INSERT | 搜索入参 |
-| 854 | 上市公司企业简介 | 1:1 | 1层+4个Object | ON DUPLICATE KEY UPDATE | 搜索入参 |
-| 1168 | 组织机构 | 1:1 | 2个Array(2级) | ON DUPLICATE KEY UPDATE | 搜索入参 |
-| 1149 | 企业规模 | 1:1 | 简单字符串 | ON DUPLICATE KEY UPDATE | 搜索入参 |
-| 967 | 主要指标-年度 | 1:N | 数组(每年度一行) | DELETE+INSERT | 搜索入参 |
-| 1114 | 法律诉讼 | 1:N | 数组+翻页+casePersons | DELETE+INSERT | 搜索入参 |
-| 973 | 现金流量表 | 1:N | 数组(每报告期一行) | DELETE+INSERT | 搜索入参 |
-| P51060 | 付款指数（PAYDEX®） | 1:1 | res JSON字符串 | ON DUPLICATE KEY UPDATE | 搜索入参(entityName) |
+### 天眼查(12个接口)
 
-## 共享规则
+| 接口 | 名称 | 频次 | 查询计费 | 翻页 | 数据关系 | prepaid_filter |
+|:-----|:-----|:-----|:---------|:-----|:---------|:--------------|
+| 819 | 企业基本信息（含主要人员） | daily | 否 | 无 | 1:1 | 是 |
+| 1058 | 企业天眼风险 | daily | 否 | 无 | 1:N(3层嵌套) | 是 |
+| 822 | 变更记录 | daily | 否 | 无 | 1:N(2层展平) | 是 |
+| 1168 | 组织机构 | daily | 是 | 无 | 1:1(2个Array) | 是 |
+| 1149 | 企业规模 | daily | 否 | 无 | 1:1(简单字符串) | 是 |
+| 1114 | 法律诉讼 | daily | 是 | 有(250页/5000条) | 1:N+翻页 | 是 |
+| 1041 | 司法解析 | daily | 是 | 有(250页/5000条) | 1:N+翻页 | 是 |
+| 851 | 欠税公告 | monthly | 是 | 有(250页/5000条) | 1:N+翻页 | 是 |
+| 854 | 上市公司企业简介 | monthly | 否 | 无 | 1:1+4个Object | 是 |
+| 967 | 主要指标-年度 | monthly | 否 | 无 | 1:N(数组) | 是 |
+| 973 | 现金流量表 | monthly | 否 | 无 | 1:N(数组) | 是 |
 
-所有接口共用以下核心规则：
+### 邓白氏(1个接口)
 
-### Step1：API数据拉取
+| 接口 | 名称 | 频次 | 数据关系 | prepaid_filter | 认证方式 |
+|:-----|:-----|:-----|:---------|:--------------|:---------|
+| P51060 | 付款指数(PAYDEX®) | monthly | 1:1 | 是 | SHA256签名 |
 
-| 机制 | 说明 |
-|:-----|:-----|
-| 幂等检查 | 查当天 `api_call_record`，已有 `status_code=0` 的成功记录则跳过，不重复调用 |
-| 重试机制 | 事不过三：每次运行都尝试调用（即使当天已有失败记录也继续），最多3次。重试过程不插入DB，最终失败时先删除旧失败记录再插入1条最新错误信息 |
-| interface_name | 使用 `config.json` 中 `apis.{接口号}.name` 的值（如'企业基本信息（含主要人员）'、'变更记录'），而非硬编码接口号 |
-| token来源 | 通过 `apis.{接口号}.provider` 关联到 `providers` 统一管理，token续费只改一处 |
-| 原始保存 | API完整响应存入 `output_result` JSON列，失败时存错误详情JSON（error_type/error_code/error_msg/traceback） |
-| 状态码约定 | `status_code=0` 成功；负数=异常（-1 HTTP异常，-2 其他异常）；正数=API业务错误码 |
+## 核心架构
 
-执行方式：
-```bash
-python3 {接口号}-step1_api_fetch.py          # 拉取所有公司
-python3 {接口号}-step1_api_fetch.py "公司名"  # 拉取指定公司
+### 两步流水线
+
+每个接口遵循统一的 **Step1(API拉取) → Step2(数据解析)** 流程：
+
+- **Step1**: 调用三方API，原始响应存入 `ods_api_call_record_df` (dt分区)
+- **Step2**: 读取成功记录，解析后写入对应的ODS目标表 (dt分区)
+
+### 两阶段分离(Step1)
+
+Step1内部采用两阶段分离，节省API调用次数：
+- **Phase1 - API调用**: 事不过三重试(HTTP异常+业务错误重试)；查询即计费接口失败不重试
+- **Phase2 - Delta写入**: 写入失败直接报错终止，不浪费API配额重试写入
+
+### 三层调用规则
+
+每个接口的调用由三层判断链控制：
+
+| 层级 | 判断 | 说明 |
+|:-----|:-----|:-----|
+| 1. 频次 | `should_run_today()` | daily=每天跑, monthly=只在月度跑批日(5号)跑 |
+| 2. 预付款过滤 | `is_prepaid_filter_enabled()` | 非月度跑批日只处理非预付款客户(is_prepaid='否') |
+| 3. 幂等 | `has_success_today()` | 当天dt分区已有status_code=0则跳过 |
+
+### Phase 2 补充跑批(新增预付款客户)
+
+月度跑批日之后新增的预付款客户需要补充处理：
+
+| 场景 | daily接口 | monthly接口 |
+|:-----|:---------|:-----------|
+| Phase1(月度跑批日) | 全部客户，写t-1分区 | 全部客户，写月度分区 |
+| Phase1(非月度跑批日) | 非预付款客户，写t-1分区 | 不执行 |
+| Phase2(补充) | 新增预付款客户，写月度分区 | 新增预付款客户，写月度分区 |
+
+- **检测**: call record表查最近月度跑批日至今无成功记录的预付款客户
+- **写入**: 补充数据写入最近月度跑批日分区，下游无需改动
+- **防重复**: 月度分区有记录后，下次检测查到 → 跳过
+
+## 表名格式
+
+所有ODS表: `powerlink.pw_ods.ods_{接口类型}_{接口id}_df`，PARTITIONED BY (dt STRING)
+
+| 接口 | 表名 | 数据关系 |
+|:-----|:-----|:---------|
+| 819 | ods_tyc_819_df | 1:1 |
+| 1058 | ods_tyc_1058_df | 1:N |
+| 822 | ods_tyc_822_df | 1:N |
+| 851 | ods_tyc_851_df | 1:N |
+| 854 | ods_tyc_854_df | 1:1 |
+| 1168 | ods_tyc_1168_df | 1:1 |
+| 1149 | ods_tyc_1149_df | 1:1 |
+| 967 | ods_tyc_967_df | 1:N |
+| 1114 | ods_tyc_1114_df | 1:N |
+| 1041 | ods_tyc_1041_df | 1:N |
+| 973 | ods_tyc_973_df | 1:N |
+| P51060 | ods_dnb_P51060_df | 1:1 |
+| call record | ods_api_call_record_df | 调用记录 |
+
+## 预警邮件系统
+
+`daily_call_analysis_alert_notebook.py` — 每日调用分析+异常预警邮件：
+- 统计各接口调用频次和计费消耗
+- 检测异常调用模式(高频失败、余额不足等)
+- 通过 Microsoft Graph API 发送 tesa 品牌样式预警邮件
+- 收件人为业务相关人员
+
+## 配置说明
+
+`config.json` 包含以下核心配置(详见 `tyc_new/config/config.json.example`)：
+
+| 配置块 | 说明 |
+|:-------|:-----|
+| `providers` | 天眼查token / 邓白氏client_key+client_secret |
+| `schedule.monthly_day` | 月度跑批日(默认5号) |
+| `apis.*` | 各接口URL/频次/计费/预付款过滤/正常错误码 |
+| `alert` | 预警邮件(Graph API认证+收件人+logo路径) |
+| `error_code_desc` | 天眼查/邓白氏错误码对照表 |
+
+**配置路径**: `/Workspace/Shared/powerlink_warehouse/tyc_new/config/config.json`
+
+**注意**: config.json包含敏感信息，已在.gitignore中排除。
+
+## 运行方式
+
+所有脚本为Databricks Notebook版，复制到Notebook cell中运行。
+
+每个接口需要3个cell：
+
+```python
+# Cell 1 - 初始化(所有接口共用)
+# 复制 notebook_init.py 内容，修改COMMON_PATH为实际部署路径
+
+# Cell 2 - Step1 API拉取
+# 复制 {接口号}-step1_api_fetch_notebook.py
+
+# Cell 3 - Step2 数据解析
+# 复制 {接口号}-step2_data_parse_notebook.py
 ```
 
-### Step2：数据解析
-
-| 机制 | 说明 |
-|:-----|:-----|
-| 去重取最新 | 按 `input_param` 分组，取 `create_time` 最大的一条成功记录 |
-| 关联追溯 | 带出 `api_call_record.id` 写入 `api_record_id`；`data_create_time` 自动记录 |
-| 主公司名来源 | 来自搜索入参 `input_param`，非API返回的name字段 |
-| 空值规范 | 空字符串 `""` 和 `0` → NULL |
-| 空结果/非目标公司 | 部分接口（如854）对非上市公司返回error_code=300000，step1记录为失败，step2天然跳过 |
-
----
-
-## 819接口 — 企业基本信息
-
-### [819-step1_api_fetch.py](etl_script/819-step1_api_fetch.py)
-
-从天眼查819接口拉取企业基本信息，原始响应存入 `api_call_record` 表。
-
-### [819-step2_data_parse.py](etl_script/819-step2_data_parse.py)
-
-1:1关系，解析后写入 `company_819_info` 表（65个字段）。
-
-**解析规则（最细粒度拆分）：**
-
-| 数据类型 | 处理方式 | 示例 |
-|:---------|:---------|:-----|
-| `Array + child String` | 逗号分隔字符串 | `emailList` → `"a@b.com,c@d.com"` |
-| `Object + 多KV` | 每个KV展开为独立列 | `industryAll` → 8列（4级分类 + 4级代码） |
-| `Object + 可能多条` | JSON字符串 + 提取total | `staffList` → `staff_list_json` + `staff_list_total` |
-| `Number时间戳` | ≥1e10为毫秒÷1000 → datetime | `173376000000` → `1975-07-01` |
-| `简单字段` | 驼峰→下划线 + 必要映射 | `creditCode`→`social_credit_code`，`BRNNumber`→`brn_number` |
-
-**显式字段映射：**
-
-| API原始key | DB列名 | 原因 |
-|:-----------|:-------|:-----|
-| `id` | `company_id` | 避免与表主键冲突 |
-| `type` | `legal_person_type` | 避免SQL关键字，1=人 2=公司 |
-| `orgNumber` | `org_code` | 标准命名 |
-| `creditCode` | `social_credit_code` | 标准命名 |
-| `BRNNumber` | `brn_number` | 连续大写缩写保留 |
-| `actualCapital` | `paid_capital` | 标准命名 |
-| `base` | `province_short` | 避免歧义 |
-| `alias` | `company_alias` | 避免歧义 |
-| `estiblishTime` | `est_date` | 时间戳→datetime |
-| `fromTime` | `from_date` | 时间戳→datetime |
-| `toTime` | `to_date` | 时间戳→datetime |
-| `approvedTime` | `approval_date` | 时间戳→datetime |
-| `updateTimes` | `update_time` | 时间戳→datetime |
-
----
-
-## 1058接口 — 企业天眼风险
-
-### [1058-step1_api_fetch.py](etl_script/1058-step1_api_fetch.py)
-
-从天眼查1058接口拉取企业天眼风险数据。与819-step1同构。
-
-### [1058-step2_data_parse.py](etl_script/1058-step2_data_parse.py)
-
-1:N关系，3层嵌套展平后写入 `company_1058_risk_info` 表（16个字段）。
-
-**3层展平路径：** `riskList[]` → `list[]` → `list[]`
-
-| API路径 | DB列名 | 说明 |
-|:---------|:-------|:-----|
-| `input_param` | `main_company_name` | 来自搜索入参 |
-| `result.riskLevel` | `risk_level` | 顶层字段 |
-| `riskList[].count` | `risk_category_count` | 风险类别条数 |
-| `riskList[].name` | `risk_category_name` | 自身/周边/历史/预警 |
-| `riskList[].list[].total` | `risk_type_total` | 风险类型条数 |
-| `riskList[].list[].tag` | `risk_type_tag` | 警示/高风险/提示 |
-| `riskList[].list[].list[].id` | `risk_id` | 避免与表主键冲突 |
-| `riskList[].list[].list[].companyId` | `company_id` | 可空 |
-| `riskList[].list[].list[].companyName` | `company_name` | 可空 |
-
----
-
-## 822接口 — 变更记录
-
-### [822-step1_api_fetch.py](etl_script/822-step1_api_fetch.py)
-
-从天眼查822接口拉取企业变更记录数据。与819/1058-step1同构。
-
-### [822-step2_data_parse.py](etl_script/822-step2_data_parse.py)
-
-1:N关系，2层展平后写入 `company_822_change_info` 表（10个字段）。
-
-**2层展平路径：** `result.total` + `result.items[]`
-
-| API路径 | DB列名 | 说明 |
-|:---------|:-------|:-----|
-| `input_param` | `company_name` | 来自搜索入参，非API返回 |
-| `result.total` | `total` | 变更记录总数（meta字段） |
-| `result.items[].changeItem` | `change_item` | 变更项名称 |
-| `result.items[].contentBefore` | `content_before` | 变更前内容(TEXT) |
-| `result.items[].contentAfter` | `content_after` | 变更后内容(TEXT) |
-| `result.items[].changeTime` | `change_time` | 变更时间(VARCHAR) |
-| `result.items[].createTime` | `create_time` | 记录创建时间(VARCHAR) |
-
----
-
-## 854接口 — 上市公司企业简介
-
-### [854-step1_api_fetch.py](etl_script/854-step1_api_fetch.py)
-
-从天眼查854接口拉取上市公司企业简介数据。与819/822/1058-step1同构。
-
-### [854-step2_data_parse.py](etl_script/854-step2_data_parse.py)
-
-1:1关系，4个Object字段展开后写入 `company_854_stock_info` 表（36个字段）。
-
-**特殊逻辑：** 非上市公司查询成功但result为空 → step2跳过（SKIP_EMPTY），不插入空数据。
-
-**4个Object字段展开规则（每个→type/name/id 3列）：**
-
-| API Object | DB前缀 | 展开列 | 说明 |
-|:-----------|:-------|:-------|:-----|
-| `result.generalManager` | `gm` | `gm_type/gm_name/gm_id` | 总经理 |
-| `result.chairman` | `chairman` | `chairman_type/chairman_name/chairman_id` | 董事长 |
-| `result.secretaries` | `secretary` | `secretary_type/secretary_name/secretary_id` | 董秘 |
-| `result.legal` | `legal_person` | `legal_person_type/legal_person_name/legal_person_id` | 法人 |
-
-- `cType`: 1=公司, 2=人（INT）
-- `id`: 人物ID（BIGINT）；`id="0"` → NULL
-- `name`: 人物姓名（VARCHAR(120)）
-
-**显式字段映射：**
-
-| API原始key | DB列名 | 原因 |
-|:-----------|:-------|:-----|
-| `code` | `stock_code` | 避免与其他code混淆 |
-| `companyName` | `stock_company_name` | 区别于入参company_name |
-| `name` | `listed_name` | 上市公司简称，区别于搜索入参 |
-
----
-
-## 1168接口 — 组织机构
-
-### [1168-step1_api_fetch.py](etl_script/1168-step1_api_fetch.py)
-
-从天眼查1168接口拉取企业组织机构类型数据。与819/1058/822/854-step1同构。
-
-### [1168-step2_data_parse.py](etl_script/1168-step2_data_parse.py)
-
-1:1关系，解析后写入 `company_1168_org_type_info` 表（7个字段）。
-
-**解析规则（数组→逗号分隔拆列）：**
-
-| API路径 | DB列名 | 说明 |
-|:---------|:-------|:-----|
-| `input_param` | `company_name` | 来自搜索入参 |
-| `result.orgTypes[].level1` | `org_type_level1` | 一级机构类型（逗号分隔） |
-| `result.orgTypes[].level2` | `org_type_level2` | 二级机构类型（逗号分隔） |
-| `result.economyTypes[].level1` | `economy_type_level1` | 一级经济类型（逗号分隔） |
-| `result.economyTypes[].level2` | `economy_type_level2` | 二级经济类型（逗号分隔） |
-
----
-
-## 1149接口 — 企业规模
-
-### [1149-step1_api_fetch.py](etl_script/1149-step1_api_fetch.py)
-
-从天眼查1149接口拉取企业规模数据。与其他step1同构。
-
-### [1149-step2_data_parse.py](etl_script/1149-step2_data_parse.py)
-
-1:1关系，解析后写入 `company_1149_scale_info` 表（5个字段）。
-
-**解析规则：** `result` 直接为字符串（如"大型"），映射为 `company_scale` 列。
-
----
-
-## 967接口 — 主要指标-年度
-
-### [967-step1_api_fetch.py](etl_script/967-step1_api_fetch.py)
-
-从天眼查967接口拉取上市公司主要指标数据。与其他step1同构。
-
-### [967-step2_data_parse.py](etl_script/967-step2_data_parse.py)
-
-1:N关系，解析后写入 `company_967_main_index_info` 表（38个字段）。
-
-**解析规则：**
-
-- `result` 为数组，每个年度对象 → 一行记录
-- ~28个DECIMAL(24,4)字段 + `showYear`(VARCHAR)
-- 非上市公司返回error_code=300000，step1记录失败，step2天然跳过
-- DECIMAL字段中0是有效值（如营收为0），不转NULL
-
----
-
-## 1114接口 — 法律诉讼
-
-### [1114-step1_api_fetch.py](etl_script/1114-step1_api_fetch.py)
-
-从天眼查1114接口拉取企业法律诉讼数据。**支持翻页**（pageNum/pageSize），step1循环拉取所有页并合并存入一条api_call_record。
-
-⚠️ **特别备注**：天眼查最多返回500条记录，合并后存入JSON类型列（可存储约1GB）。保守方案，若未来数据量超限需调整存储策略。
-
-### [1114-step2_data_parse.py](etl_script/1114-step2_data_parse.py)
-
-1:N关系，解析后写入 `company_1114_lawsuit_info` 表（31个字段）。
-
-**解析规则：**
-
-| 数据类型 | 处理方式 | 示例 |
-|:---------|:---------|:-----|
-| 诉讼基本信息 | 14个字段展开 | `docType`→`doc_type`, `caseNo`→`case_no`等 |
-| 涉案方 | 取前2人，各展开6列 | casePersons[0]→`role1/gid1/emotion1/sptname1/name1/type1` |
-| 毫秒时间戳 | ≥1e10÷1000→datetime | `submitTime`: 1628784000000 → 2021-08-12 |
-
-**显式字段映射：**
-
-| API原始key | DB列名 | 原因 |
-|:-----------|:-------|:-----|
-| `id` | `lawsuit_id` | 避免与表主键冲突 |
-| `casePersons[0].result` | `case_result` | 避免与API顶层result混淆 |
-
----
-
-## 973接口 — 现金流量表
-
-### [973-step1_api_fetch.py](etl_script/973-step1_api_fetch.py)
-
-从天眼查973接口拉取上市公司现金流量表数据。与其他step1同构。API默认返回最近一期数据（如"2026(Q1)"），无需翻页。
-
-**特别备注：** 非上市公司返回error_code=300000，step1记录失败，step2天然跳过。
-
-### [973-step2_data_parse.py](etl_script/973-step2_data_parse.py)
-
-1:N关系，解析后写入 `company_973_cash_flow_info` 表（41个字段）。
-
-**解析规则：**
-
-- `result.corpCashFlow` 数组展平，每个报告期 → 一行记录
-- 37个VARCHAR字段（带单位的字符串如"7.92亿"、"6143.66万"）
-- 不提取 `corpFinancialYears`（其信息已在 `showYear` 体现）
-- API返回的字段名已是snake_case，与DB列名一致，仅 `showYear→show_year` 需映射
-- 空字符串 → NULL
-
----
-
-## P51060接口 — 付款指数（PAYDEX®）
-
-### [P51060-step1_api_fetch.py](etl_script/P51060-step1_api_fetch.py)
-
-从邓白氏P51060接口拉取企业付款指数数据。**与天眼查接口差异较大：**
-
-| 差异点 | 天眼查 | 邓白氏 |
-|:-------|:-------|:-------|
-| 请求方式 | GET | POST |
-| 认证方式 | Authorization header (token) | SHA256(client_key + client_secret + sku_no + body + timestamp) |
-| 搜索参数 | keyword (公司名) | entityName (公司名) + uscc (统一社会信用代码，从819表查取) |
-| 响应格式 | {error_code, result, reason} | {code, res(JSON字符串), msg, trace} |
-| 成功判断 | error_code=0 | code=0 |
-| 无结果 | error_code=300000 | code=1 |
-
-其他规则与天眼查一致：幂等检查、事不过三、原始保存。
-
-### [P51060-step2_data_parse.py](etl_script/P51060-step2_data_parse.py)
-
-1:1关系，解析后写入 `company_P51060_paydex_info` 表（21个字段）。
-
-**解析规则：**
-
-- `res` 为JSON字符串，需 `json.loads()` 二次解析
-- `companyHistoryPayDexes` (List) → JSON字符串存储
-- 字段名 camelCase → snake_case（显式FIELD_MAPPING映射）
-- 空字符串 → NULL
-- `company_name` 来自搜索入参（entityName），非API返回
-
-**显式字段映射：**
-
-| API原始key | DB列名 | 原因 |
-|:-----------|:-------|:-----|
-| `companyPayDex` | `company_paydex` | 驼峰→下划线 |
-| `companyPayDexDate` | `company_paydex_date` | 驼峰→下划线 |
-| `companyHistoryPayDexes` | `company_history_paydexes` | List→JSON字符串 |
-| `encompanyAverage` | `en_company_average` | en前缀+驼峰→下划线 |
-| `enindustryAverage` | `en_industry_average` | en前缀+驼峰→下划线 |
-| `industryPayDexDate` | `industry_paydex_date` | 驼峰→下划线 |
-| `industryLowerQuartilePayDex` | `industry_lower_quartile_paydex` | 驼峰→下划线 |
-| `industryMedianPayDex` | `industry_median_paydex` | 驼峰→下划线 |
-| `industryUpperQuartilePayDex` | `industry_upper_quartile_paydex` | 驼峰→下划线 |
-| `industryCountNum` | `industry_count_num` | 驼峰→下划线 |
-| `industryCompanyPosition` | `industry_company_position` | 驼峰→下划线 |
-
----
-
-## [api_call_record.sql](ddl/api_call_record.sql) — 数据库DDL
-
-在 `powerlink` 库下建表：
-- `api_call_record` — 三方接口调用记录表（7个字段，所有接口共用）
-- `company_819_info` — 企业基本信息表（65个字段）
-- `customer_info` — 客户公司列表（3个字段）
-- `company_1058_risk_info` — 企业天眼风险表（16个字段）
-- `company_822_change_info` — 变更记录表（10个字段）
-- `company_854_stock_info` — 上市公司企业简介表（36个字段）
-- `company_1168_org_type_info` — 组织机构类型表（7个字段）
-- `company_1149_scale_info` — 企业规模表（5个字段）
-- `company_967_main_index_info` — 主要指标-年度表（38个字段）
-- `company_1114_lawsuit_info` — 法律诉讼表（31个字段）
-- `company_973_cash_flow_info` — 现金流量表（41个字段）
-- `company_P51060_paydex_info` — 付款指数（21个字段）
-
----
-
-## [databricks_ods_ddl.sql](ddl/databricks_ods_ddl.sql) — Databricks ODS层DDL
-
-MySQL 11张接口数据表迁移到Databricks大数据平台ODS层的建表DDL。
-
-**命名规则**：`ods_pl_` 前缀（PowerLink项目缩写），字段名与MySQL完全一致便于追溯。
-
-**类型映射**：
-
-| MySQL | Databricks | 说明 |
-|:------|:-----------|:-----|
-| VARCHAR(n)/TEXT/LONGTEXT | STRING | Spark SQL无VARCHAR |
-| JSON | STRING | 存原始JSON，可用`from_json()`解析 |
-| DATETIME | TIMESTAMP | Spark时间类型 |
-| BIGINT/INT/DECIMAL(24,4) | 保持不变 | 直接映射 |
-
-**ODS层规范**：USING PARquet存储，无约束（无PK/UK/索引），数据完整性由ETL保证。
-
-| # | MySQL表名 | Databricks表名 | 数据关系 |
-|---|-----------|---------------|---------|
-| 1 | api_call_record | ods_pl_api_call_record | 调用记录 |
-| 2 | company_819_info | ods_pl_company_819_info | 1:1 |
-| 3 | company_822_change_info | ods_pl_company_822_change_info | 1:N |
-| 4 | company_854_stock_info | ods_pl_company_854_stock_info | 1:1 |
-| 5 | company_1058_risk_info | ods_pl_company_1058_risk_info | 1:N |
-| 6 | company_1114_lawsuit_info | ods_pl_company_1114_lawsuit_info | 1:N |
-| 7 | company_1149_scale_info | ods_pl_company_1149_scale_info | 1:1 |
-| 8 | company_1168_org_type_info | ods_pl_company_1168_org_type_info | 1:1 |
-| 9 | company_967_main_index_info | ods_pl_company_967_main_index_info | 1:N |
-| 10 | company_973_cash_flow_info | ods_pl_company_973_cash_flow_info | 1:N |
-| 11 | company_P51060_paydex_info | ods_pl_company_P51060_paydex_info | 1:1 |
-
-**生成脚本**：[gen_databricks_ods_ddl.py](ddl/gen_databricks_ods_ddl.py) 从MySQL DDL自动转换，MySQL表结构变更后重新运行即可同步更新Databricks DDL。
-
-**转换注意事项**：
-
-| # | 注意项 | 说明 |
-|---|--------|------|
-| 1 | DATETIME→TIMESTAMP | Spark TIMESTAMP带时区，MySQL DATETIME不带，导入时需指定session时区 |
-| 2 | JSON→STRING | Databricks无原生JSON类型，存原始字符串，后续可用`from_json()`解析 |
-| 3 | VARCHAR→STRING | Spark SQL无VARCHAR长度限制，长度由Parquet自动处理 |
-| 4 | DEFAULT CURRENT_TIMESTAMP | Databricks不支持列级默认时间，需INSERT时赋值 |
-| 5 | NOT NULL→去掉 | ODS层允许NULL，严格约束在DWD/DWS层加 |
-| 6 | PK/UK/INDEX→去掉 | ODS层不建约束，数据完整性由ETL保证 |
-| 7 | AUTO_INCREMENT→去掉 | Databricks不支持自增主键 |
-
----
-
-## [config.json.example](config/config.json.example) — 配置模板
-
-使用前复制为 `config.json` 并填入真实值：
-- `apis.*.token` — 已移除，改用 `providers` 统一管理
-- `providers.tyc.token` — 天眼查API授权token
-- `providers.dnb.client_key` — 邓白氏API client_key（Base64编码）
-- `providers.dnb.client_secret` — 邓白氏API client_secret（Base64编码）
-- `mysql.user / mysql.password` — MySQL账号密码
-
-**注意：** `config.json` 包含敏感信息，已在 `.gitignore` 中排除，不会提交到仓库。
-
----
-
-## [gen_data_dict.py](tools/gen_data_dict.py) — 数据字典生成工具
-
-读取DDL和解析规则，生成 `数据字典_powerlink.xlsx`：
-- 每表一个sheet（表概览 + 字段明细）
-- 字段明细12列：序号 / 字段名 / 中文名 / 类型 / 长度 / 主键 / 空值 / 默认值 / 来源 / 原始路径 / 转换规则 / 备注
-
----
-
-## 运行环境
-
-| 依赖 | 说明 |
-|:-----|:-----|
-| Python 3.10+ | DS容器或本机 |
-| pymysql | MySQL连接 |
-| requests | HTTP请求 |
-| openpyxl | 数据字典Excel生成 |
-| MySQL 8.x | powerlink库 |
-| DolphinScheduler 3.2.0 | 定时调度（可选） |
-
-## 使用流程
-
-```bash
-# 1. 填写配置
-cp config/config.json.example config/config.json
-# 编辑config.json填入真实token和密码
-
-# 2. 执行DDL建表
-mysql -u root -p powerlink < ddl/api_call_record.sql
-
-# 3. 拉取+解析（819接口）
-python3 etl_script/819-step1_api_fetch.py
-python3 etl_script/819-step2_data_parse.py
-
-# 4. 拉取+解析（1058接口）
-python3 etl_script/1058-step1_api_fetch.py
-python3 etl_script/1058-step2_data_parse.py
-
-# 5. 拉取+解析（822接口）
-python3 etl_script/822-step1_api_fetch.py
-python3 etl_script/822-step2_data_parse.py
-
-# 6. 拉取+解析（854接口）
-python3 etl_script/854-step1_api_fetch.py
-python3 etl_script/854-step2_data_parse.py
-
-# 7. 拉取+解析（1168接口）
-python3 etl_script/1168-step1_api_fetch.py
-python3 etl_script/1168-step2_data_parse.py
-
-# 8. 拉取+解析（1149接口）
-python3 etl_script/1149-step1_api_fetch.py
-python3 etl_script/1149-step2_data_parse.py
-
-# 9. 拉取+解析（967接口）
-python3 etl_script/967-step1_api_fetch.py
-python3 etl_script/967-step2_data_parse.py
-
-# 10. 拉取+解析（1114接口）
-python3 etl_script/1114-step1_api_fetch.py
-python3 etl_script/1114-step2_data_parse.py
-
-# 11. 拉取+解析（973接口）
-python3 etl_script/973-step1_api_fetch.py
-python3 etl_script/973-step2_data_parse.py
-
-# 12. 拉取+解析（P51060接口-邓白氏）
-python3 etl_script/P51060-step1_api_fetch.py
-python3 etl_script/P51060-step2_data_parse.py
-
-# 13. 生成数据字典
-python3 tools/gen_data_dict.py
-```
+**自定义分区**: Step1脚本中可设置 `CUSTOMER_DT = '20260614'` 指定客户表分区日期，默认自动取MAX(dt)。
+
+## 部署步骤
+
+1. 在Databricks SQL Editor中执行DDL建表
+2. 将config.json上传到 `/Workspace/Shared/powerlink_warehouse/tyc_new/config/`
+3. 将etl_script/目录上传到Databricks Workspace或通过Repos同步
+4. 每个接口创建Notebook，粘贴3个cell内容运行
+5. 运行 `diagnostic_test.py` 验证环境
+
+## 与旧版(MySQL)的主要差异
+
+| 维度 | 旧版(tyc) | 新版(tyc_new) |
+|:-----|:----------|:-------------|
+| 数据平台 | MySQL 8.0 | Databricks (Unity Catalog) |
+| 数据格式 | InnoDB | Delta Lake |
+| 表命名 | company_xxx | ods_tyc_xxx_df / ods_dnb_xxx_df |
+| 分区 | 无 | PARTITIONED BY (dt STRING) |
+| 运行方式 | spark-submit | Notebook cell |
+| 写入方式 | INSERT / ON DUPLICATE KEY UPDATE | 动态分区覆盖(overwrite) |
+| Schema | 硬编码 | 从Delta表动态读取 |
+| 重试逻辑 | 事不过三(API+写入一起) | 两阶段分离 + 查询计费接口失败不重试 |
+| 预付款过滤 | 无 | 三层调用规则 + Phase 2补充跑批 |
+| 预警邮件 | 无 | Graph API + tesa品牌样式 |
 
 ## 已知踩坑
 
 | # | Bug | Fix |
 |:--|:----|:----|
-| 1 | `Optional` 类型导入缺失 | 加 `from typing import Optional` |
-| 2 | `historyNames` 分号字符串非合法JSON | 用 `historyNameList` 替代 |
-| 3 | 时间戳阈值 `>1e12` 对12位毫秒值误判 | 改为 `≥1e10` |
-| 4 | 遗漏 aboveScale 等4个字段 | ALTER TABLE + DDL + 脚本同步补齐 |
-| 5 | `BRNNumber` → `b_r_n_number` | FIELD_MAPPING 显式映射 → `brn_number` |
-| 6 | `id` 字段与表主键冲突 | 显式映射 id→company_id/risk_id 等 |
-| 7 | 失败3次产生3条重复记录，且失败后SKIP阻止重试 | 每次都尝试（不跳过失败），最终失败时delete旧记录+insert最新1条 |
-| 8 | 854-step2假设result为空需跳过 | 非上市公司返回error_code=300000，移除`if not result`死代码 |
-| 9 | config.json每个API重复携带相同token | 改为顶层`providers`统一管理，各API用`provider`字段关联 |
+| 1 | `Optional`类型导入缺失 | 加 `from typing import Optional` |
+| 2 | `historyNames`分号字符串非合法JSON | 用 `historyNameList` 替代 |
+| 3 | 时间戳阈值`>1e12`对12位毫秒值误判 | 改为 `≥1e10` |
+| 4 | 遗漏aboveScale等4个字段 | ALTER TABLE + DDL + 脚本同步补齐 |
+| 5 | `BRNNumber`→`b_r_n_number` | FIELD_MAPPING显式映射→`brn_number` |
+| 6 | `id`字段与表主键冲突 | 显式映射id→company_id/risk_id等 |
+| 7 | 失败3次产生3条重复记录 | delete旧记录+insert最新1条 |
+| 8 | 854-step2假设result为空需跳过 | 非上市公司error_code=300000，移除死代码 |
+| 9 | config.json每个API重复携带相同token | 改为顶层`providers`统一管理 |
+| 10 | `dict.get('orgTypes', [])`对JSON null返回None | 改为 `.get('orgTypes') or []` |
+| 11 | step1改了dt但客户表仍从MAX(dt)读取 | 新增`CUSTOMER_DT`参数支持指定客户表分区 |
+| 12 | config.json.example中7个URL与PDF文档不符 | 逐个校验PDF文档，修正所有URL |
