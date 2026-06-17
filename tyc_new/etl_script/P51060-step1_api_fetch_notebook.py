@@ -13,7 +13,7 @@
 前置条件: Cell1已执行notebook_init
 """
 
-from common.config_loader import load_config, get_interface_name, get_api_config, get_provider_config
+from common.config_loader import load_config, get_interface_name, get_api_config, get_provider_config, should_run_today, is_prepaid_filter_enabled, get_monthly_day
 from common.spark_utils import (get_spark, get_company_list, has_success_today, write_api_records, get_uscc, MAX_RETRY)
 import json, requests, hashlib, uuid, time, traceback
 from datetime import datetime, timedelta
@@ -23,12 +23,14 @@ CONFIG = load_config()
 INTERFACE_NAME = get_interface_name(CONFIG, INTERFACE_KEY)
 spark = get_spark()
 dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+CUSTOMER_DT = None  # 指定客户表分区日期，None=自动取MAX(dt)
 
 print("=" * 60)
 print(f"【Notebook版】邓白氏{INTERFACE_KEY}接口({INTERFACE_NAME}) - API数据拉取")
 print("=" * 60)
 print(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print(f"分区dt: {dt}")
+print(f"客户表分区: {CUSTOMER_DT or '自动(MAX(dt))'}")
 print(f"数据源: 邓白氏(POST + SHA256签名)")
 print(f"重试策略: 事不过三(最多{MAX_RETRY}次) + 两阶段分离")
 print()
@@ -178,27 +180,36 @@ def process_company(keyword):
 
 # ========== 执行 ==========
 
-companies = get_company_list(spark)
-if not companies:
-    print("[WARNING] 没有获取到公司列表，任务结束")
+# 频次检查: 根据配置判断今天是否需要调用
+if not should_run_today(CONFIG, INTERFACE_KEY):
+    freq = get_api_config(CONFIG, INTERFACE_KEY).get('frequency', 'daily')
+    monthly_day = get_monthly_day(CONFIG)
+    print(f"[SKIP] {INTERFACE_KEY}接口频次配置为'{freq}', 月度跑批日为每月{monthly_day}号, 今天不是调用日期, 跳过执行")
 else:
-    stats = {'SUCCESS': 0, 'FAILED': 0, 'SKIP_SUCCESS': 0}
+    # 预付款过滤 + 获取客户列表
+    prepaid_filter = is_prepaid_filter_enabled(CONFIG, INTERFACE_KEY)
+    monthly_day = get_monthly_day(CONFIG)
+    companies = get_company_list(spark, prepaid_filter=prepaid_filter, monthly_day=monthly_day, customer_dt=CUSTOMER_DT)
+    if not companies:
+        print("[WARNING] 没有获取到公司列表，任务结束")
+    else:
+        stats = {'SUCCESS': 0, 'FAILED': 0, 'SKIP_SUCCESS': 0}
 
-    for i, company in enumerate(companies, 1):
-        print(f"\n[{i}/{len(companies)}] {company}")
+        for i, company in enumerate(companies, 1):
+            print(f"\n[{i}/{len(companies)}] {company}")
+            print("-" * 60)
+            result = process_company(company)
+            stats[result] += 1
+
+        print("\n" + "=" * 60)
+        print("拉取完成！")
         print("-" * 60)
-        result = process_company(company)
-        stats[result] += 1
-
-    print("\n" + "=" * 60)
-    print("拉取完成！")
-    print("-" * 60)
-    print(f"总计: {len(companies)} 家公司")
-    print(f"  SUCCESS:      {stats['SUCCESS']}")
-    print(f"  FAILED:       {stats['FAILED']}")
-    print(f"  SKIP_SUCCESS: {stats['SKIP_SUCCESS']}")
-    print("=" * 60)
-    print(f"\n下一步: 执行 P51060-step2_data_parse.py 解析数据")
+        print(f"总计: {len(companies)} 家公司")
+        print(f"  SUCCESS:      {stats['SUCCESS']}")
+        print(f"  FAILED:       {stats['FAILED']}")
+        print(f"  SKIP_SUCCESS: {stats['SKIP_SUCCESS']}")
+        print("=" * 60)
+        print(f"\n下一步: 执行 P51060-step2_data_parse.py 解析数据")
 
 # 如需指定单个公司，取消注释下行:
 # companies = ['公司名']

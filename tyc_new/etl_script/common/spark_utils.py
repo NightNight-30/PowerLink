@@ -96,31 +96,32 @@ def get_spark() -> SparkSession:
 
 # ========== 客户公司列表 ==========
 
-def get_company_list(spark, specific_company: str = None, prepaid_filter: bool = False, monthly_day: int = 5) -> List[str]:
+def get_company_list(spark, specific_company: str = None, prepaid_filter: bool = False, monthly_day: int = 5, customer_dt: str = None) -> List[str]:
     """
     从ads_customer_wide_tab_tmp_df读取公司列表
-    优先读取最新dt分区，取distinct name
-
+    customer_dt: 指定客户表分区日期，不指定则自动取MAX(dt)
     prepaid_filter=True时:
       月度跑批日期(monthly_day): 处理全部客户(含预付款)
-      非月度跑批日期: 仅处理非预付款客户(is_prepaid=False)
+      非月度跑批日期: 仅处理非预付款客户(is_prepaid='否')
     prepaid_filter=False时: 不过滤，处理全部客户
     """
     if specific_company:
         return [specific_company]
 
-    # 获取最新dt分区
-    latest_dt = spark.sql(
-        f"SELECT MAX(dt) FROM {CUSTOMER_TABLE}"
-    ).collect()[0][0]
+    if customer_dt:
+        query_dt = customer_dt
+    else:
+        query_dt = spark.sql(
+            f"SELECT MAX(dt) FROM {CUSTOMER_TABLE}"
+        ).collect()[0][0]
 
-    if not latest_dt:
+    if not query_dt:
         print("[WARNING] 客户表无数据，任务结束")
         return []
 
     base_sql = (
         f"SELECT DISTINCT name FROM {CUSTOMER_TABLE} "
-        f"WHERE dt = '{latest_dt}' AND name IS NOT NULL AND name != ''"
+        f"WHERE dt = '{query_dt}' AND name IS NOT NULL AND name != ''"
     )
 
     if prepaid_filter:
@@ -133,7 +134,7 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
 
     df = spark.sql(base_sql)
     companies = sorted([row.name for row in df.collect()])
-    print(f"[INFO] 从客户表获取到 {len(companies)} 家公司 (dt={latest_dt})")
+    print(f"[INFO] 从客户表获取到 {len(companies)} 家公司 (dt={query_dt})")
     return companies
 
 

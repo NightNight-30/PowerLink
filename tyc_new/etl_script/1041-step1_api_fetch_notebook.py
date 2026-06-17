@@ -19,12 +19,14 @@ CONFIG = load_config()
 INTERFACE_NAME = get_interface_name(CONFIG, INTERFACE_KEY)
 spark = get_spark()
 dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+CUSTOMER_DT = None  # 指定客户表分区日期，None=自动取MAX(dt)
 
 print("=" * 60)
 print(f"【Notebook版】天眼查{INTERFACE_KEY}接口({INTERFACE_NAME}) - API数据拉取(含翻页)")
 print("=" * 60)
 print(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print(f"分区dt: {dt}")
+print(f"客户表分区: {CUSTOMER_DT or '自动(MAX(dt))'}")
 print(f"翻页策略: pageSize={PAGE_SIZE}, 最多翻页{MAX_PAGES}页, 循环拉取合并存储")
 print(f"重试策略: 无(查询即计费，失败直接返回)")
 print()
@@ -180,7 +182,7 @@ else:
     # 预付款过滤 + 获取客户列表
     prepaid_filter = is_prepaid_filter_enabled(CONFIG, INTERFACE_KEY)
     monthly_day = get_monthly_day(CONFIG)
-    companies = get_company_list(spark, prepaid_filter=prepaid_filter, monthly_day=monthly_day)
+    companies = get_company_list(spark, prepaid_filter=prepaid_filter, monthly_day=monthly_day, customer_dt=CUSTOMER_DT)
     if not companies:
         print("[WARNING] 没有获取到公司列表，任务结束")
     else:
