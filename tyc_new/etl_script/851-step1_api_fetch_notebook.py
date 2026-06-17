@@ -7,8 +7,8 @@
 翻页逻辑保留，但失败不重试
 """
 
-from common.config_loader import load_config, get_interface_name, get_api_config, should_run_today, is_prepaid_filter_enabled, get_monthly_day
-from common.spark_utils import (get_spark, get_company_list, has_success_today, write_api_records)
+from common.config_loader import load_config, get_interface_name, get_api_config, should_run_today, is_prepaid_filter_enabled, get_monthly_day, get_last_monthly_batch_date
+from common.spark_utils import (get_spark, get_company_list, has_success_today, write_api_records, get_supplementary_prepaid_companies)
 import json, requests, traceback
 from datetime import datetime, timedelta
 
@@ -203,6 +203,34 @@ else:
         print(f"  SKIP_SUCCESS: {stats['SKIP_SUCCESS']}")
         print("=" * 60)
         print(f"\n下一步: 执行 {INTERFACE_KEY}-step2_data_parse.py 解析数据")
+
+
+# ========== Phase 2: 补充跑批(新增预付款客户) ==========
+
+monthly_day = get_monthly_day(CONFIG)
+last_batch_date = get_last_monthly_batch_date(CONFIG)
+supp_companies = get_supplementary_prepaid_companies(spark, INTERFACE_KEY, monthly_day, customer_dt=CUSTOMER_DT)
+
+if supp_companies:
+    print(f"\n{'=' * 60}")
+    print(f"【补充跑批】新增预付款客户 - 写入月度分区dt={last_batch_date}")
+    print(f"{'=' * 60}")
+
+    original_dt = dt
+    dt = last_batch_date  # 写入月度跑批日分区
+
+    supp_stats = {'SUCCESS': 0, 'FAILED': 0, 'SKIP_SUCCESS': 0}
+    for i, company in enumerate(supp_companies, 1):
+        print(f"\n[{i}/{len(supp_companies)}] {company} (补充)")
+        print("-" * 60)
+        result = process_company(company)
+        supp_stats[result] += 1
+
+    dt = original_dt  # 恢复原始dt
+
+    print(f"\n补充跑批统计: SUCCESS={supp_stats['SUCCESS']}, FAILED={supp_stats['FAILED']}, SKIP={supp_stats['SKIP_SUCCESS']}")
+else:
+    print("\n[补充跑批] 无新增预付款客户需要补充处理")
 
 # 如需指定单个公司，取消注释下行:
 # companies = ['公司名']

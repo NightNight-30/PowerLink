@@ -138,6 +138,62 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
     return companies
 
 
+# ========== 补充跑批(新增预付款客户) ==========
+
+def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: int, customer_dt: str = None) -> List[str]:
+    """
+    获取需要补充处理的预付款客户列表
+    条件: is_prepaid='是' 且 最近月度跑批日至今无成功调用记录(status_code=0)
+    补充处理写入月度跑批日分区，下游无需改动
+    """
+    # 1. 获取客户表分区日期
+    if customer_dt:
+        query_dt = customer_dt
+    else:
+        query_dt = spark.sql(f"SELECT MAX(dt) FROM {CUSTOMER_TABLE}").collect()[0][0]
+
+    if not query_dt:
+        print("[INFO] 客户表无数据，无补充预付款客户")
+        return []
+
+    # 2. 获取预付款客户列表
+    prepaid_df = spark.sql(
+        f"SELECT DISTINCT name FROM {CUSTOMER_TABLE} "
+        f"WHERE dt = '{query_dt}' AND is_prepaid = '是' AND name IS NOT NULL AND name != ''"
+    )
+    prepaid_list = sorted([row.name for row in prepaid_df.collect()])
+
+    if not prepaid_list:
+        print("[INFO] 无预付款客户，无需补充处理")
+        return []
+
+    # 3. 计算最近月度跑批日
+    from common.config_loader import get_last_monthly_batch_date
+    last_batch_date = get_last_monthly_batch_date({'schedule': {'monthly_day': monthly_day}})
+
+    # 4. 查询最近月度跑批日至今已成功处理的预付款客户
+    call_record_table = get_api_record_table(interface_key)
+    processed_since = spark.sql(
+        f"SELECT DISTINCT input_param FROM {call_record_table} "
+        f"WHERE dt >= '{last_batch_date}' AND status_code = 0"
+    )
+    processed_set = set([row.input_param for row in processed_since.collect()])
+
+    # 5. 补充 = 预付款 - 已处理
+    supplementary = [c for c in prepaid_list if c not in processed_set]
+
+    if supplementary:
+        print(f"[补充跑批] 检测到 {len(supplementary)} 个新增预付款客户需要补充处理 (dt={last_batch_date})")
+        if len(supplementary) <= 10:
+            print(f"  补充客户: {supplementary}")
+        else:
+            print(f"  补充客户(前10): {supplementary[:10]}...")
+    else:
+        print(f"[补充跑批] 所有预付款客户已在月度跑批日({last_batch_date})处理，无需补充")
+
+    return supplementary
+
+
 # ========== 幂等检查 ==========
 
 def has_success_today(spark, keyword: str, dt: str, interface_key: str) -> bool:

@@ -56,6 +56,24 @@ def get_monthly_day(config: Dict) -> int:
     return config.get('schedule', {}).get('monthly_day', 5)
 
 
+def get_last_monthly_batch_date(config) -> str:
+    """
+    计算最近月度跑批日的日期(yyyyMMdd格式)
+    今天>=monthly_day: 本月monthly_day(如今天6月17号,月度5号→6月5号=20260605)
+    今天<monthly_day: 上月monthly_day(如今天6月3号,月度5号→5月5号=20260505)
+    """
+    monthly_day = get_monthly_day(config)
+    today = datetime.now()
+    if today.day >= monthly_day:
+        batch_date = today.replace(day=monthly_day)
+    else:
+        if today.month == 1:
+            batch_date = today.replace(year=today.year - 1, month=12, day=monthly_day)
+        else:
+            batch_date = today.replace(month=today.month - 1, day=monthly_day)
+    return batch_date.strftime('%Y%m%d')
+
+
 def should_run_today(config: Dict, interface_key: str) -> bool:
     """
     根据接口频次配置判断今天是否需要调用

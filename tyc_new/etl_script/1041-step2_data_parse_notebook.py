@@ -11,10 +11,10 @@
 
 import json, traceback
 from datetime import datetime, timedelta
-from common.config_loader import load_config, get_interface_name
+from common.config_loader import load_config, get_interface_name, get_last_monthly_batch_date, get_monthly_day
 from common.spark_utils import (
     get_spark, get_today_success_records, write_target_data,
-    get_target_table_name, array_to_string
+    get_target_table_name, array_to_string, get_supplementary_prepaid_companies
 )
 
 INTERFACE_KEY = '1041'
@@ -110,3 +110,53 @@ else:
     print(f"  FAILED:  {failed_count}")
     print(f"  总司法案件记录数: {total_case_rows}")
     print("=" * 60)
+
+# ========== Phase 2: 补充跑批解析(新增预付款客户) ==========
+
+monthly_day = get_monthly_day(CONFIG)
+last_batch_date = get_last_monthly_batch_date(CONFIG)
+supp_companies = get_supplementary_prepaid_companies(spark, INTERFACE_KEY, monthly_day)
+
+if supp_companies:
+    print(f"\n{'=' * 60}")
+    print(f"【补充跑批】解析新增预付款客户 - 写入月度分区dt={last_batch_date}")
+    print(f"{'=' * 60}")
+
+    original_dt = dt
+    dt = last_batch_date  # 写入月度跑批日分区
+
+    supp_success = 0
+    supp_failed = 0
+
+    for company in supp_companies:
+        print(f"\n[补充] {company}")
+        print("-" * 60)
+        try:
+            supp_records = get_today_success_records(spark, dt, INTERFACE_KEY, company_name=company)
+            if not supp_records:
+                print(f"[WARNING] 补充跑批: {company} 无成功调用记录，跳过解析")
+                continue
+            company_parsed_rows = []
+            for rec in supp_records:
+                rows = parse_judicial_case_data(json.loads(rec['output_result_str']), rec['input_param'], rec['id'])
+                if rows is None:
+                    continue
+                if isinstance(rows, list):
+                    company_parsed_rows.extend(rows)
+                else:
+                    company_parsed_rows.append(rows)
+            if company_parsed_rows:
+                write_target_data(spark, company_parsed_rows, table_name, dt,
+                                  is_one_to_one=False, company_name=company)
+                print(f"[SUCCESS] 补充解析入库: {company}, {len(company_parsed_rows)}条")
+            supp_success += 1
+        except Exception as e:
+            print(f"[ERROR] 补充解析失败: {company} - {e}")
+            traceback.print_exc()
+            supp_failed += 1
+
+    dt = original_dt  # 恢复原始dt
+
+    print(f"\n补充跑批解析统计: SUCCESS={supp_success}, FAILED={supp_failed}")
+else:
+    print("\n[补充跑批] 无新增预付款客户需要补充解析")
