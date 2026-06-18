@@ -131,5 +131,10 @@ def get_error_code_desc(config: Dict, provider: str) -> Dict[str, str]:
 
 
 def get_alert_config(config: Dict) -> Dict:
-    """获取预警邮件配置(SMTP设置、收件人等)"""
+    """获取预警邮件配置(Graph API client_credentials 凭据、收件人等)"""
     return config.get('alert', {})
+
+
+def get_data_export_config(config: Dict) -> Dict:
+    """获取每日数据导出配置(输出目录、保留天数)"""
+    return config.get('data_export', {})

@@ -64,6 +64,7 @@
   },
   "alert": {
     "method": "graph_api",
+    "cloud": "global",
     "tenant_id": "<BEIERSDORF_AZURE_AD_TENANT_ID>",
     "client_id": "<AZURE_AD_APP_CLIENT_ID>",
     "client_secret": "<AZURE_AD_APP_CLIENT_SECRET>",
@@ -71,5 +72,9 @@
     "to_addr": ["<BUSINESS_PERSON_1_EMAIL>", "<BUSINESS_PERSON_2_EMAIL>"],
     "subject_prefix": "【外部数据预警】",
     "logo_path": "/Workspace/Shared/powerlink_warehouse/tyc_new/config/tesa_logo.png"
+  },
+  "data_export": {
+    "base_dir": "/Workspace/Shared/powerlink_warehouse/tyc_new/data_exports",
+    "retention_days": 30
   }
 }

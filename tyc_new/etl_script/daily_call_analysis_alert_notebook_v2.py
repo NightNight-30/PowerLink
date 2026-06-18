@@ -14,14 +14,13 @@ from common.config_loader import (
     should_run_today, get_monthly_day, is_charge_per_query
 )
 from common.spark_utils import (
-    get_spark, get_api_record_table, CATALOG, SCHEMA
+    get_spark, get_api_record_table, CATALOG, SCHEMA, CUSTOMER_TABLE
 )
 import json
 import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.image import MIMEImage
+import base64
+import requests
+from urllib.parse import quote
 from datetime import datetime, timedelta
 
 CONFIG = load_config()
@@ -30,7 +29,7 @@ dt = (datetime.now() - timedelta(days=2)).strftime('%Y%m%d')
 # run_date = datetime.now().strftime('%Y-%m-%d')
 run_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
 
-ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1114', '973', 'P51060']
+ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041','1114', '973', 'P51060']
 
 print("=" * 60)
 print("【外部数据接口调用分析 & 预警邮件】")
@@ -73,6 +72,8 @@ def get_interface_stats(interface_key):
                 'abnormal_failure': 0,
                 'charge_per_query': charge_per_query,
                 'call_count': 0,
+                'non_prepaid_calls': 0,
+                'prepaid_calls': 0,
                 'abnormal_details': []
             }
 
@@ -123,6 +124,22 @@ def get_interface_stats(interface_key):
                 })
 
         call_count = total if charge_per_query else success
+
+        # 按客户类型(账期/预付款)拆分调用记录数 - JOIN 客户表 input_param=name
+        customer_split = spark.sql(f"""
+        SELECT
+          SUM(CASE WHEN c.is_prepaid = '否' THEN 1 ELSE 0 END) as non_prepaid_calls,
+          SUM(CASE WHEN c.is_prepaid = '是' THEN 1 ELSE 0 END) as prepaid_calls
+        FROM {table} t
+        LEFT JOIN (
+          SELECT DISTINCT name, is_prepaid FROM {CUSTOMER_TABLE}
+          WHERE dt = '{dt}'
+        ) c ON t.input_param = c.name
+        WHERE t.dt = '{dt}'
+        """).collect()[0]
+        non_prepaid_calls = customer_split.non_prepaid_calls or 0
+        prepaid_calls = customer_split.prepaid_calls or 0
+
         return {
             'interface_key': interface_key,
             'interface_name': interface_name,
@@ -136,6 +153,8 @@ def get_interface_stats(interface_key):
             'abnormal_failure': abnormal_failure,
             'charge_per_query': charge_per_query,
             'call_count': call_count,
+            'non_prepaid_calls': non_prepaid_calls,
+            'prepaid_calls': prepaid_calls,
             'abnormal_details': abnormal_details
         }
 
@@ -151,6 +170,7 @@ def get_interface_stats(interface_key):
             'error': str(e),
             'total': 0, 'success': 0, 'normal_failure': 0, 'abnormal_failure': 0,
             'charge_per_query': charge_per_query, 'call_count': 0,
+            'non_prepaid_calls': 0, 'prepaid_calls': 0,
             'abnormal_details': []
         }
 
@@ -171,7 +191,8 @@ for ik in ALL_INTERFACE_KEYS:
         status_tag = "⚠️"
         run_tag = " [无数据]"
     print(f"  {status_tag} {ik}({stat['interface_name']}): "
-          f"总计={stat['total']}, 成功={stat['success']}, "
+          f"总计={stat['total']} (账期={stat['non_prepaid_calls']}/预付={stat['prepaid_calls']}), "
+          f"成功={stat['success']}, "
           f"正常失败={stat['normal_failure']}, 异常失败={stat['abnormal_failure']}, "
           f"调用次数={stat['call_count']}{run_tag}")
 
@@ -200,12 +221,14 @@ def generate_html_email(stats_list, run_date, dt, need_alert):
     grand_normal = sum(s['normal_failure'] for s in stats_list)
     grand_abnormal = sum(s['abnormal_failure'] for s in stats_list)
     grand_call_count = sum(s['call_count'] for s in stats_list)
+    grand_non_prepaid = sum(s['non_prepaid_calls'] for s in stats_list)
+    grand_prepaid = sum(s['prepaid_calls'] for s in stats_list)
 
-    # 预警标题
+    # 预警标题 (格式与附件脚本对齐: 状态 + 【接口调用数据】业务日期 YYYYMMDD)
     if need_alert:
-        title = f"⚠️ 外部数据接口异常预警 - {run_date}"
+        title = f"⚠️【接口调用数据】业务日期 {dt}"
     else:
-        title = f"✅ 外部数据接口运行正常 - {run_date}"
+        title = f"✅【接口调用数据】业务日期 {dt}"
 
     html = f"""
 <!DOCTYPE html>
@@ -214,52 +237,59 @@ def generate_html_email(stats_list, run_date, dt, need_alert):
 <meta charset="utf-8">
 <style>
 body {{ font-family: 'Microsoft YaHei', Arial, sans-serif; background-color: #FFFFFF; padding: 20px; color: #5E5E5E; }}
-.header-row {{ display: flex; align-items: center; justify-content: flex-start; gap: 10px; margin: 10px 0; }}
-.tesa-logo {{ height: 40px; }}
-.project-badge {{ display: inline-flex; align-items: center; height: 26px; border-radius: 4px; overflow: hidden; }}
-.project-badge-red {{ background-color: #E3000F; color: #FFFFFF; font-size: 18px; font-weight: bold; padding: 0 12px; height: 26px; line-height: 26px; }}
-.project-badge-gap {{ background-color: #FFFFFF; height: 26px; width: 4px; }}
-.project-badge-blue {{ background-color: #009fdf; color: #FFFFFF; font-size: 18px; font-weight: bold; padding: 0 12px; height: 26px; line-height: 26px; }}
-h2 {{ color: #009fdf; border-bottom: 2px solid #373737; padding-bottom: 8px; margin-top: 15px; }}
 h3 {{ color: #009fdf; border-bottom: 1px solid #373737; padding-bottom: 4px; }}
-table {{ border-collapse: collapse; width: 100%; margin: 15px 0; }}
-th {{ background-color: #373737; color: #FFFFFF; padding: 10px; text-align: center; border: 1px solid #373737; }}
-td {{ border: 1px solid #CCCCCC; padding: 8px; text-align: center; color: #5E5E5E; }}
-tr:nth-child(even) {{ background-color: #F8F8F8; }}
+table.data {{ border-collapse: collapse; width: 100%; margin: 15px 0; }}
+table.data th {{ background-color: #373737; color: #FFFFFF; padding: 10px; text-align: center; border: 1px solid #373737; }}
+table.data td {{ border: 1px solid #CCCCCC; padding: 8px; text-align: center; color: #5E5E5E; }}
+table.data tr:nth-child(even) {{ background-color: #F8F8F8; }}
 .warn {{ color: #E3000F; font-weight: bold; }}
 .normal {{ color: #009fdf; }}
 .detail {{ background-color: #E8F4FD; border-left: 4px solid #009fdf; padding: 10px; margin: 8px 0; }}
 .no-run {{ color: #999999; }}
 .summary {{ background-color: #FFFFFF; border: 1px solid #373737; border-top: 4px solid #373737; padding: 15px; margin: 10px 0; }}
 .total-row {{ background-color: #E8F4FD; font-weight: bold; }}
-.divider {{ border: none; border-top: 2px solid #373737; margin: 15px 0; }}
-.brand-bar {{ height: 6px; overflow: hidden; margin: 10px 0; }}
-.brand-bar-red {{ background-color: #E3000F; width: 66%; height: 6px; float: left; }}
-.brand-bar-gap {{ background-color: #FFFFFF; width: 2%; height: 6px; float: left; }}
-.brand-bar-blue {{ background-color: #009fdf; width: 32%; height: 6px; float: left; }}
 </style>
 </head>
 <body>
-<div class="brand-bar"><div class="brand-bar-red"></div><div class="brand-bar-gap"></div><div class="brand-bar-blue"></div></div>
-<div class="header-row">
-<div class="project-badge">
-<span class="project-badge-red">Power</span><span class="project-badge-gap"></span><span class="project-badge-blue">Link</span>
-</div>
-<img src="cid:tesa_logo" class="tesa-logo" alt="tesa">
-</div>
-<h2>{title}</h2>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; border:none; height:2px; margin:4px 0;">
+<tr>
+<td width="66%" height="2" style="background-color:#E3000F; height:2px; line-height:2px; font-size:1px; border:none;">&nbsp;</td>
+<td width="2%" height="2" style="background-color:#FFFFFF; height:2px; line-height:2px; font-size:1px; border:none;">&nbsp;</td>
+<td width="32%" height="2" style="background-color:#009fdf; height:2px; line-height:2px; font-size:1px; border:none;">&nbsp;</td>
+</tr>
+</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; border:none; margin:4px 0;">
+<tr>
+<td valign="middle" style="padding:4px 0; border:none;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; border:none;">
+<tr>
+<td height="24" style="background-color:#E3000F; color:#FFFFFF; font-size:15px; font-weight:bold; padding:0 10px; height:24px; line-height:20px; font-family:'Microsoft YaHei',Arial,sans-serif; border:none;">Power</td>
+<td width="4" height="24" style="background-color:#FFFFFF; height:24px; line-height:20px; font-size:1px; border:none;">&nbsp;</td>
+<td height="24" style="background-color:#009fdf; color:#FFFFFF; font-size:15px; font-weight:bold; padding:0 10px; height:24px; line-height:20px; font-family:'Microsoft YaHei',Arial,sans-serif; border:none;">Link</td>
+</tr>
+</table>
+</td>
+<td width="10" style="border:none; font-size:0; line-height:0;">&nbsp;</td>
+<td valign="middle" style="padding:4px 0; border:none;">
+<img src="cid:tesa_logo" height="40" alt="tesa" style="display:block; height:40px; border:0;" />
+</td>
+<td width="100%" align="right" valign="middle" style="border:none; text-align:right; padding:4px 0; color:#009fdf; font-size:18px; font-weight:bold; font-family:'Microsoft YaHei',Arial,sans-serif;">{title}</td>
+</tr>
+</table>
 <div class="summary">
 <strong>汇总统计(dt={dt})</strong><br>
-总调用: {grand_total} | 成功: <span class="normal">{grand_success}</span> |
+总调用: {grand_total} (账期: <span class="normal">{grand_non_prepaid}</span> / 预付: {grand_prepaid}) |
+成功: <span class="normal">{grand_success}</span> |
 正常失败: {grand_normal} | 异常失败: <span class="warn">{grand_abnormal}</span> |
 调用次数: {grand_call_count}
 </div>
 
 <h3>各接口调用详情</h3>
-<table>
+<table class="data">
 <tr>
 <th>接口ID</th><th>接口名称</th><th>数据源</th><th>频次</th>
-<th>总调用</th><th>成功</th><th>正常失败</th><th>异常失败</th><th>调用次数</th><th>状态</th>
+<th>总调用</th><th>账期客户</th><th>预付款客户</th>
+<th>成功</th><th>正常失败</th><th>异常失败</th><th>调用次数</th><th>状态</th>
 </tr>
 """
 
@@ -282,6 +312,8 @@ tr:nth-child(even) {{ background-color: #F8F8F8; }}
 <td>{s['provider']}</td>
 <td>{s['frequency']}{run_tag}</td>
 <td>{s['total']}</td>
+<td class="normal">{s['non_prepaid_calls']}</td>
+<td>{s['prepaid_calls']}</td>
 <td class="normal">{s['success']}</td>
 <td>{s['normal_failure']}</td>
 <td{abnormal_class}>{s['abnormal_failure']}</td>
@@ -292,7 +324,8 @@ tr:nth-child(even) {{ background-color: #F8F8F8; }}
     html += f"""
 <tr class="total-row">
 <td>合计</td><td>—</td><td>—</td><td>—</td>
-<td>{grand_total}</td><td class="normal">{grand_success}</td>
+<td>{grand_total}</td><td class="normal">{grand_non_prepaid}</td><td>{grand_prepaid}</td>
+<td class="normal">{grand_success}</td>
 <td>{grand_normal}</td><td{(' class="warn"' if grand_abnormal > 0 else '')}>{grand_abnormal}</td>
 <td>{grand_call_count}</td><td>—</td>
 </tr>"""
@@ -340,7 +373,13 @@ tr:nth-child(even) {{ background-color: #F8F8F8; }}
         html += "</ul>\n"
 
     html += """
-<div class="brand-bar"><div class="brand-bar-red"></div><div class="brand-bar-gap"></div><div class="brand-bar-blue"></div></div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; border:none; height:2px; margin:4px 0;">
+<tr>
+<td width="66%" height="2" style="background-color:#E3000F; height:2px; line-height:2px; font-size:1px; border:none;">&nbsp;</td>
+<td width="2%" height="2" style="background-color:#FFFFFF; height:2px; line-height:2px; font-size:1px; border:none;">&nbsp;</td>
+<td width="32%" height="2" style="background-color:#009fdf; height:2px; line-height:2px; font-size:1px; border:none;">&nbsp;</td>
+</tr>
+</table>
 <p style="color:#5E5E5E; font-size:12px;">
 此邮件由tesa®数据团队自动生成，如有疑问请联系 Powerlink.GC@tesa.com<br>
 天眼查正常错误码: 300000=经查无结果 | 邓白氏正常错误码: 1=请求无结果, 1021=未收录(暂归正常), 2001=处理失败/参数问题<br>
@@ -363,81 +402,123 @@ html_content = generate_html_email(all_stats, run_date, dt, need_alert)
 # ========== 5. 发送邮件 ==========
 
 def send_alert_email(config, html_content, run_date, need_alert):
-    """通过SMTP发送预警邮件"""
+    """通过 Microsoft Graph API (client_credentials) 发送预警邮件
+
+    默认 cloud=global 走全球版(login.microsoftonline.com + graph.microsoft.com);
+    cloud=china 走世纪互联运营的中国版云(login.partner.microsoftonline.cn + microsoftgraph.chinacloudapi.cn)。
+    """
     alert_config = get_alert_config(config)
 
     if not alert_config:
         print("[WARNING] 未配置预警邮件(alert section), 跳过发送")
         return False
 
-    smtp_host = alert_config.get('smtp_host')
-    smtp_port = alert_config.get('smtp_port', 465)
-    smtp_ssl = alert_config.get('smtp_ssl', True)
-    smtp_user = alert_config.get('smtp_user')
-    smtp_password = alert_config.get('smtp_password')
+    tenant_id = alert_config.get('tenant_id')
+    client_id = alert_config.get('client_id')
+    client_secret = alert_config.get('client_secret')
     from_addr = alert_config.get('from_addr')
     to_addr = alert_config.get('to_addr', [])
     subject_prefix = alert_config.get('subject_prefix', '【外部数据预警】')
+    logo_path = alert_config.get('logo_path', '')
+    cloud = alert_config.get('cloud', 'global')
 
-    if not all([smtp_host, smtp_user, smtp_password, from_addr, to_addr]):
-        print("[WARNING] 预警邮件配置不完整, 跳过发送")
+    if cloud == 'china':
+        token_endpoint = f"https://login.partner.microsoftonline.cn/{tenant_id}/oauth2/v2.0/token"
+        graph_scope = "https://microsoftgraph.chinacloudapi.cn/.default"
+        graph_base = "https://microsoftgraph.chinacloudapi.cn"
+    else:
+        token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+        graph_scope = "https://graph.microsoft.com/.default"
+        graph_base = "https://graph.microsoft.com"
+
+    if not all([tenant_id, client_id, client_secret, from_addr, to_addr]):
+        print("[WARNING] Graph API 配置不完整(需 tenant_id/client_id/client_secret/from_addr/to_addr), 跳过发送")
         return False
 
     subject = f"{subject_prefix} {run_date} "
-    if need_alert:
-        subject += "⚠️ 存在异常失败"
-    else:
-        subject += "✅ 运行正常"
+    subject += "⚠️ 存在异常失败" if need_alert else "✅ 运行正常"
 
-    msg = MIMEMultipart('related')
-    msg['Subject'] = subject
-    msg['From'] = from_addr
-    msg['To'] = ', '.join(to_addr)
+    # 1. 换 access token (client_credentials)
+    token_data = {
+        'grant_type': 'client_credentials',
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'scope': graph_scope,
+    }
+    token_resp = None
+    try:
+        token_resp = requests.post(token_endpoint, data=token_data, timeout=30)
+        token_resp.raise_for_status()
+        access_token = token_resp.json().get('access_token')
+        if not access_token:
+            print(f"[ERROR] Graph token 响应中无 access_token: {token_resp.text[:500]}")
+            return False
+    except Exception as e:
+        print(f"[ERROR] 换取 Graph token 失败: {e}")
+        if token_resp is not None:
+            print(f"       HTTP {token_resp.status_code} 响应: {token_resp.text[:500]}")
+        return False
 
-    html_part = MIMEText(html_content, 'html', 'utf-8')
-    msg.attach(html_part)
-
-    # 嵌入tesa logo(CID方式)
-    logo_path = alert_config.get('logo_path', '')
+    # 2. 构造邮件 + 内联 logo 附件(CID: tesa_logo)
+    attachments = []
     if logo_path and os.path.exists(logo_path):
         with open(logo_path, 'rb') as f:
-            logo_data = f.read()
-        logo_part = MIMEImage(logo_data)
-        logo_part.add_header('Content-ID', '<tesa_logo>')
-        msg.attach(logo_part)
+            logo_b64 = base64.b64encode(f.read()).decode('utf-8')
+        attachments.append({
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": "tesa_logo.png",
+            "contentType": "image/png",
+            "contentBytes": logo_b64,
+            "isInline": True,
+            "contentId": "tesa_logo",
+        })
+    elif logo_path:
+        print(f"[WARNING] logo 文件不存在: {logo_path}(邮件将不含 tesa logo)")
 
+    payload = {
+        "message": {
+            "subject": subject,
+            "body": {"contentType": "HTML", "content": html_content},
+            "toRecipients": [{"emailAddress": {"address": a}} for a in to_addr],
+            "attachments": attachments,
+        },
+        "saveToSentItems": False,
+    }
+
+    # 3. 以 from_addr 身份调用 sendMail
+    send_url = f"{graph_base}/v1.0/users/{quote(from_addr, safe='')}/sendMail"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
     try:
-        if smtp_ssl:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port)
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port)
-            server.starttls()
-
-        server.login(smtp_user, smtp_password)
-        server.sendmail(from_addr, to_addr, msg.as_string())
-        server.quit()
-        print(f"[SUCCESS] 预警邮件已发送: {subject} → {', '.join(to_addr)}")
-        return True
+        send_resp = requests.post(send_url, json=payload, headers=headers, timeout=60)
+        if send_resp.status_code == 202:
+            print(f"[SUCCESS] 预警邮件已发送: {subject} → {', '.join(to_addr)}")
+            return True
+        print(f"[ERROR] Graph sendMail 失败: HTTP {send_resp.status_code}")
+        print(f"       响应: {send_resp.text[:800]}")
+        return False
     except Exception as e:
-        print(f"[ERROR] 预警邮件发送失败: {e}")
+        print(f"[ERROR] Graph sendMail 异常: {e}")
         return False
 
 
 # ========== 6. 执行 ==========
 
-# send_result = send_alert_email(CONFIG, html_content, run_date, need_alert)
+send_result = send_alert_email(CONFIG, html_content, run_date, need_alert)
 
-# print("\n" + "=" * 60)
-# print("分析完成！")
-# print("-" * 60)
-# if need_alert:
-#     print("⚠️ 本次存在异常失败，已发送预警邮件")
-# else:
-#     print("✅ 所有接口运行正常")
-# if send_result:
-#     print("邮件发送成功")
-# else:
-#     print("邮件未发送(配置缺失或发送失败)")
-# print("=" * 60)
+print("\n" + "=" * 60)
+print("分析完成！")
+print("-" * 60)
+if need_alert:
+    print("⚠️ 本次存在异常失败，已发送预警邮件")
+else:
+    print("✅ 所有接口运行正常")
+if send_result:
+    print("邮件发送成功")
+else:
+    print("邮件未发送(配置缺失或发送失败)")
+print("=" * 60)
 
 displayHTML(html_content)
