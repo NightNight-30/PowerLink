@@ -21,7 +21,8 @@ PowerLink/
 │   │   │   └── spark_utils.py        # Spark/Delta通用工具+补充跑批检测
 │   │   ├── notebook_init.py          # Notebook初始化cell
 │   │   ├── diagnostic_test.py        # 环境诊断
-│   │   ├── daily_call_analysis_alert_notebook.py  # 调用分析预警邮件
+│   │   ├── daily_call_analysis_alert_notebook_v2.py  # 调用分析预警邮件(V2正式版)
+│   │   ├── daily_data_export_notebook.py            # 每日解析数据导出+邮件附件发送
 │   │   ├── {接口号}-step1_api_fetch_notebook.py   # 12个接口的API拉取
 │   │   └── {接口号}-step2_data_parse_notebook.py  # 12个接口的数据解析
 │   └── tools/
@@ -120,11 +121,28 @@ Step1内部采用两阶段分离，节省API调用次数：
 
 ## 预警邮件系统
 
-`daily_call_analysis_alert_notebook.py` — 每日调用分析+异常预警邮件：
-- 统计各接口调用频次和计费消耗
+`daily_call_analysis_alert_notebook_v2.py` — 每日调用分析+异常预警邮件(V2正式版，V1已弃用)：
+- 统计各接口调用频次和计费消耗，**含账期/预付款客户拆分**(LEFT JOIN客户表按is_prepaid分组)
 - 检测异常调用模式(高频失败、余额不足等)
 - 通过 Microsoft Graph API 发送 tesa 品牌样式预警邮件
 - 收件人为业务相关人员
+- 邮件标题格式: `✅【接口调用数据】业务日期 YYYYMMDD` / 异常时 `⚠️【接口调用数据】业务日期 YYYYMMDD`
+
+## 数据附件邮件系统(新增)
+
+`daily_data_export_notebook.py` — 每日解析数据导出+邮件附件发送：
+
+| 阶段 | 动作 |
+|:-----|:-----|
+| Phase 1 | 读取每接口 step2 解析 Delta 表 → CSV(UTF-8 BOM) → 打包 ZIP → 滚动保留 N 天 |
+| Phase 2 | Graph API 复用 alert 段凭据发送邮件，ZIP 普通附件 + tesa logo 内联 |
+
+- 邮件统计表 9 列: 接口ID/接口名称/频次/调用成功/解析行数/数据关系(1:1/1:N)/账期客户/预付款客户/未分类
+- Databricks Workspace 写入限制绕过: `toPandas()` + Python 文件 API(driver 可写 Workspace)
+- TIMESTAMP 列超范围坑: cast 成 string 再 toPandas
+- 1058 特殊处理: 优先 `main_company_name`(搜索入参=客户公司)，`company_name` 是风险相关公司不可关联
+
+详细设计文档存放在 Obsidian `claude变更记录/project/powerlink/其他/数据附件邮件发送设计.md`
 
 ## 配置说明
 
@@ -135,8 +153,13 @@ Step1内部采用两阶段分离，节省API调用次数：
 | `providers` | 天眼查token / 邓白氏client_key+client_secret |
 | `schedule.monthly_day` | 月度跑批日(默认5号) |
 | `apis.*` | 各接口URL/频次/计费/预付款过滤/正常错误码 |
-| `alert` | 预警邮件(Graph API认证+收件人+logo路径) |
+| `alert` | 预警邮件+数据附件邮件(Graph API认证+`cloud`字段+收件人+logo路径) |
+| `data_export` | 每日数据导出配置(输出目录`base_dir`+保留天数`retention_days`) |
 | `error_code_desc` | 天眼查/邓白氏错误码对照表 |
+
+**Graph API 云环境**(`alert.cloud` 字段)：
+- `global`(默认): `login.microsoftonline.com` + `graph.microsoft.com`
+- `china`(世纪互联): `login.partner.microsoftonline.cn` + `microsoftgraph.chinacloudapi.cn`
 
 **配置路径**: `/Workspace/Shared/powerlink_warehouse/tyc_new/config/config.json`
 
@@ -200,3 +223,7 @@ Step1内部采用两阶段分离，节省API调用次数：
 | 10 | `dict.get('orgTypes', [])`对JSON null返回None | 改为 `.get('orgTypes') or []` |
 | 11 | step1改了dt但客户表仍从MAX(dt)读取 | 新增`CUSTOMER_DT`参数支持指定客户表分区 |
 | 12 | config.json.example中7个URL与PDF文档不符 | 逐个校验PDF文档，修正所有URL |
+| 13 | Spark executor 不能写 `/Workspace/Shared`(Mkdirs failed) + DBFS root 禁用 | `toPandas()` 收集到driver + Python文件API直接写Workspace |
+| 14 | 819表TIMESTAMP列存在超范围值，`toPandas()` 报 out of bounds | 所有TIMESTAMP列 cast 成 string 再 toPandas |
+| 15 | 预警邮件彩带"很粗" — 裸CSS `td{padding:8px}` 污染了布局表，2px彩带被撑成~18px | CSS选择器加 `.data` 前缀，数据表加 `class="data"` |
+| 16 | 1058表 `company_name` 是API返回的风险相关公司，不是客户公司 | LEFT JOIN 客户表用 `main_company_name`(搜索入参=客户公司) |
