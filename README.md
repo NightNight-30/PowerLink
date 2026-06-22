@@ -128,6 +128,8 @@ Step1内部采用两阶段分离，节省API调用次数：
 - 收件人为业务相关人员
 - 邮件标题格式: `✅【接口调用数据】业务日期 YYYYMMDD` / 异常时 `⚠️【接口调用数据】业务日期 YYYYMMDD`
 
+**数据取值范围**(2026-06-22 调整)：查 `dt IN (T-1, 最近月度跑批日)` 两分区 + `create_time ∈ [T, T+1)` 当天创建时间过滤。覆盖账期客户(每天跑)+新增预付款客户(非月度跑批日补充跑,调用记录写 T-1 分区)两种场景,排除月度跑批日跑的历史数据。客户表 JOIN 统一用 `dt = T-1`(最新分区)。
+
 ## 数据附件邮件系统(新增)
 
 `daily_data_export_notebook.py` — 每日解析数据导出+邮件附件发送：
@@ -141,6 +143,8 @@ Step1内部采用两阶段分离，节省API调用次数：
 - Databricks Workspace 写入限制绕过: `toPandas()` + Python 文件 API(driver 可写 Workspace)
 - TIMESTAMP 列超范围坑: cast 成 string 再 toPandas
 - 1058 特殊处理: 优先 `main_company_name`(搜索入参=客户公司)，`company_name` 是风险相关公司不可关联
+
+**数据取值范围**(2026-06-22 调整)：与预警脚本同策略,但过滤字段是解析表的 `data_create_time`(不是调用记录表的 `create_time`)。查 `dt IN (T-1, 最近月度跑批日)` + `data_create_time ∈ [T, T+1)`。新增预付款客户补充跑时 step2 把 `dt` 改成 `last_batch_date`,但 `data_create_time=T` 仍能被捕获。ZIP 只包含有数据的表(`cnt==0` 跳过导出)。
 
 详细设计文档存放在 Obsidian `claude变更记录/project/powerlink/其他/数据附件邮件发送设计.md`
 
@@ -227,3 +231,4 @@ Step1内部采用两阶段分离，节省API调用次数：
 | 14 | 819表TIMESTAMP列存在超范围值，`toPandas()` 报 out of bounds | 所有TIMESTAMP列 cast 成 string 再 toPandas |
 | 15 | 预警邮件彩带"很粗" — 裸CSS `td{padding:8px}` 污染了布局表，2px彩带被撑成~18px | CSS选择器加 `.data` 前缀，数据表加 `class="data"` |
 | 16 | 1058表 `company_name` 是API返回的风险相关公司，不是客户公司 | LEFT JOIN 客户表用 `main_company_name`(搜索入参=客户公司) |
+| 17 | 预警/附件脚本只查 T-1 单分区,漏掉新增预付款客户的补充跑批数据(step2 写入月度跑批日分区) | 改为双分区查询 `dt IN (T-1, 月度跑批日)` + 当天创建时间过滤(`create_time`/`data_create_time ∈ [T, T+1)`),排除月度跑批日跑的历史数据 |

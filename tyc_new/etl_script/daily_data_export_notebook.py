@@ -25,7 +25,7 @@ from pyspark.sql import functions as F
 
 from common.config_loader import (
     load_config, get_interface_name, get_api_config,
-    get_data_export_config, get_alert_config,
+    get_data_export_config, get_alert_config, get_last_monthly_batch_date,
 )
 from common.spark_utils import get_spark, get_target_table_name, get_api_record_table, CUSTOMER_TABLE
 
@@ -34,9 +34,6 @@ CONFIG = load_config()
 spark = get_spark()
 
 # ========== 可调参数 ==========
-
-# 导出日期。None = 自动取每接口最新分区(MAX(dt)); 填字符串则用固定日期
-EXPORT_DT = '20260609'
 
 # 是否发送邮件(Phase 2); False 时仅生成 ZIP 不发邮件
 SEND_EMAIL = False
@@ -56,11 +53,25 @@ ATTACHMENT_LIMIT = 4 * 1024 * 1024
 
 # ==============================
 
-run_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+# 数据取值范围:
+#   - 分析日期 run_date = T (今天)
+#   - 数据分区 dt = T-1 (账期客户昨天跑批) + 月度跑批日 (预付款客户/月度接口)
+#   - 创建时间窗口: data_create_time 在 [今天0点, 明天0点) 之间
+#     只看"今天解析写入"的数据, 排除月度跑批日跑的历史数据
+run_date = datetime.now().strftime('%Y-%m-%d')
+dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+monthly_dt = get_last_monthly_batch_date(CONFIG)
+
+today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+tomorrow_start = today_start + timedelta(days=1)
+today_start_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
+tomorrow_start_str = tomorrow_start.strftime('%Y-%m-%d %H:%M:%S')
 
 print("=" * 60)
 print("【每日解析数据导出 (Phase 1: CSV + ZIP + Phase 2: 邮件)】")
 print("=" * 60)
+print(f"分析日期: {run_date} (数据分区: dt={dt}, 月度分区={monthly_dt})")
+print(f"创建时间窗口: {today_start_str} ~ {tomorrow_start_str}")
 print()
 
 
@@ -98,32 +109,11 @@ print(f"  完成: 删除 {deleted_count} 个过期目录")
 print()
 
 
-# ========== 2. 解析 EXPORT_DT 与创建当日目录 ==========
+# ========== 2. 创建当日目录 ==========
 
-def resolve_export_dt(spark, interface_keys, override_dt):
-    """override_dt 有值时直接用；否则取所有接口 MAX(dt) 中最大的一个"""
-    if override_dt:
-        return override_dt
-    candidates = []
-    for ik in interface_keys:
-        try:
-            table = get_target_table_name(ik)
-            r = spark.sql(f"SELECT MAX(dt) FROM {table}").collect()[0][0]
-            if r:
-                candidates.append((r, ik))
-        except Exception as e:
-            print(f"  [WARN] 读取 {ik} MAX(dt) 失败: {e}")
-    if not candidates:
-        raise RuntimeError("无法确定导出日期: 所有接口 MAX(dt) 均无数据")
-    candidates.sort(reverse=True)
-    chosen = candidates[0][0]
-    print(f"  自动取最大分区: {chosen} (来自接口 {candidates[0][1]})")
-    return chosen
-
-
-print(f"[Step 2] 解析导出日期:")
-dt = resolve_export_dt(spark, ALL_INTERFACE_KEYS, EXPORT_DT)
-print(f"  最终 dt = {dt}")
+print(f"[Step 2] 数据分区:")
+print(f"  dt = {dt} (T-1, 账期客户昨天跑批)")
+print(f"  monthly_dt = {monthly_dt} (月度跑批日, 预付款客户/月度接口)")
 print()
 
 day_dir = os.path.join(BASE_DIR, dt)
@@ -143,11 +133,20 @@ def export_interface_csv(spark, interface_key, interface_name, dt, workspace_dir
     """
     table = get_target_table_name(interface_key)
 
-    cnt = spark.sql(f"SELECT COUNT(*) FROM {table} WHERE dt = '{dt}'").collect()[0][0]
+    # 查 T-1 和月度跑批日两个分区 + 当天解析写入的数据
+    cnt = spark.sql(
+        f"SELECT COUNT(*) FROM {table} "
+        f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+        f"AND data_create_time >= '{today_start_str}' AND data_create_time < '{tomorrow_start_str}'"
+    ).collect()[0][0]
     if cnt == 0:
         return None
 
-    df = spark.sql(f"SELECT * FROM {table} WHERE dt = '{dt}'")
+    df = spark.sql(
+        f"SELECT * FROM {table} "
+        f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+        f"AND data_create_time >= '{today_start_str}' AND data_create_time < '{tomorrow_start_str}'"
+    )
 
     # TIMESTAMP 列先 cast 成 string, 避免 toPandas 时 nanosecond 超范围 casting 报错
     # (pandas datetime64[ns] 只覆盖 1677-2262 年, 819 表存在超范围值)
@@ -223,17 +222,24 @@ def collect_interface_stats(spark, interface_key, interface_name, dt, customer_d
     table = get_target_table_name(interface_key)
     relationship = '1:1' if interface_key in ONE_TO_ONE_INTERFACES else '1:N'
 
-    # 调用成功数 (来自调用记录表)
+    # 调用成功数 (来自调用记录表, 同样查两分区 + 当天创建时间)
     try:
         call_record_table = get_api_record_table(interface_key)
         success_count = spark.sql(
-            f"SELECT COUNT(*) FROM {call_record_table} WHERE dt = '{dt}' AND status_code = 0"
+            f"SELECT COUNT(*) FROM {call_record_table} "
+            f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+            f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
+            f"AND status_code = 0"
         ).collect()[0][0]
     except Exception as e:
         print(f"  [WARN] {interface_key} 读取调用记录失败: {e}")
         success_count = 0
 
-    total_count = spark.sql(f"SELECT COUNT(*) FROM {table} WHERE dt = '{dt}'").collect()[0][0]
+    total_count = spark.sql(
+        f"SELECT COUNT(*) FROM {table} "
+        f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+        f"AND data_create_time >= '{today_start_str}' AND data_create_time < '{tomorrow_start_str}'"
+    ).collect()[0][0]
     if total_count == 0:
         return {
             'interface_key': interface_key,
@@ -277,7 +283,8 @@ def collect_interface_stats(spark, interface_key, interface_name, dt, customer_d
       SELECT DISTINCT name, is_prepaid FROM {CUSTOMER_TABLE}
       WHERE dt = '{customer_dt}'
     ) c ON t.{company_col} = c.name
-    WHERE t.dt = '{dt}'
+    WHERE t.dt IN ('{dt}', '{monthly_dt}')
+      AND t.data_create_time >= '{today_start_str}' AND t.data_create_time < '{tomorrow_start_str}'
     """
     r = spark.sql(sql).collect()[0]
     return {
@@ -296,7 +303,7 @@ def collect_interface_stats(spark, interface_key, interface_name, dt, customer_d
 
 
 print(f"[Step 5] 收集解析统计 (账期 vs 预付款):")
-customer_dt = dt  # 客户表分区必须和导出 dt 一致, 否则 is_prepaid 关联错日期的客户记录
+customer_dt = dt  # 客户表统一用 T-1 (最新分区), 不管业务数据是 T-1 还是月度跑批日分区
 customer_count = spark.sql(f"SELECT COUNT(*) FROM {CUSTOMER_TABLE} WHERE dt = '{customer_dt}'").collect()[0][0]
 if customer_count == 0:
     print(f"  [WARNING] 客户表 dt={customer_dt} 分区无数据! 统计的账期/预付款数都会是 0")
