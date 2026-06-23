@@ -74,12 +74,15 @@ def get_last_monthly_batch_date(config) -> str:
     return batch_date.strftime('%Y%m%d')
 
 
-def should_run_today(config: Dict, interface_key: str) -> bool:
+def should_run_today(config: Dict, interface_key: str, force_run: bool = False) -> bool:
     """
     根据接口频次配置判断今天是否需要调用
     frequency="daily" → 每天都调用
     frequency="monthly" → 仅在月度跑批日期调用(schedule.monthly_day)
+    force_run=True → 强制运行,跳过频次检查(初始化模式用)
     """
+    if force_run:
+        return True
     api_config = get_api_config(config, interface_key)
     frequency = api_config.get('frequency', 'daily')
     if frequency == 'daily':
