@@ -11,7 +11,7 @@
 from common.config_loader import (
     load_config, get_interface_name, get_api_config,
     get_normal_error_codes, get_error_code_desc, get_alert_config,
-    should_run_today, get_monthly_day, is_charge_per_query
+    should_run_today, get_monthly_day, get_last_monthly_batch_date, is_charge_per_query
 )
 from common.spark_utils import (
     get_spark, get_api_record_table, CATALOG, SCHEMA, CUSTOMER_TABLE
@@ -25,16 +25,24 @@ from datetime import datetime, timedelta
 
 CONFIG = load_config()
 spark = get_spark()
-dt = (datetime.now() - timedelta(days=2)).strftime('%Y%m%d')
-# run_date = datetime.now().strftime('%Y-%m-%d')
-run_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+run_date = datetime.now().strftime('%Y-%m-%d')
+monthly_dt = get_last_monthly_batch_date(CONFIG)
+
+# 当天创建时间窗口: create_time 在 [今天0点, 明天0点) 之间
+# 用于过滤"今天调用产生的记录", 排除月度跑批日跑的历史数据
+today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+tomorrow_start = today_start + timedelta(days=1)
+today_start_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
+tomorrow_start_str = tomorrow_start.strftime('%Y-%m-%d %H:%M:%S')
 
 ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041','1114', '973', 'P51060']
 
 print("=" * 60)
 print("【外部数据接口调用分析 & 预警邮件】")
 print("=" * 60)
-print(f"分析日期: {run_date} (分区dt: {dt})")
+print(f"分析日期: {run_date} (数据分区: dt={dt}, 月度分区={monthly_dt})")
+print(f"创建时间窗口: {today_start_str} ~ {tomorrow_start_str}")
 print()
 
 
@@ -55,8 +63,12 @@ def get_interface_stats(interface_key):
     should_run = should_run_today(CONFIG, interface_key)
 
     try:
-        # 检查表是否有数据
-        count_result = spark.sql(f"SELECT COUNT(*) FROM {table} WHERE dt = '{dt}'").collect()[0][0]
+        # 检查表是否有数据(查 T-1 和月度跑批日两个分区 + 当天创建时间)
+        count_result = spark.sql(
+            f"SELECT COUNT(*) FROM {table} "
+            f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+            f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}'"
+        ).collect()[0][0]
 
         if count_result == 0:
             return {
@@ -77,10 +89,12 @@ def get_interface_stats(interface_key):
                 'abnormal_details': []
             }
 
-        # 按status_code分组统计
+        # 按status_code分组统计(两分区 + 当天创建时间)
         rows = spark.sql(
             f"SELECT status_code, COUNT(*) as cnt FROM {table} "
-            f"WHERE dt = '{dt}' GROUP BY status_code ORDER BY status_code"
+            f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+            f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
+            f"GROUP BY status_code ORDER BY status_code"
         ).collect()
 
         total = sum(r.cnt for r in rows)
@@ -101,7 +115,9 @@ def get_interface_stats(interface_key):
                 # 获取异常记录的公司名和详情
                 detail_rows = spark.sql(
                     f"SELECT input_param, status_code, output_result FROM {table} "
-                    f"WHERE dt = '{dt}' AND status_code = {code}"
+                    f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+                    f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
+                    f"AND status_code = {code}"
                 ).collect()
                 companies = [dr.input_param for dr in detail_rows[:10]]  # 最多取10个
                 desc = desc_map.get(str(code), f'未知错误码({code})')
@@ -125,7 +141,8 @@ def get_interface_stats(interface_key):
 
         call_count = total if charge_per_query else success
 
-        # 按客户类型(账期/预付款)拆分调用记录数 - JOIN 客户表 input_param=name
+        # 按客户类型(账期/预付款)拆分调用记录数
+        # 客户表统一用 dt=T-1 (最新分区), 关联字段 input_param = name
         customer_split = spark.sql(f"""
         SELECT
           SUM(CASE WHEN c.is_prepaid = '否' THEN 1 ELSE 0 END) as non_prepaid_calls,
@@ -135,7 +152,8 @@ def get_interface_stats(interface_key):
           SELECT DISTINCT name, is_prepaid FROM {CUSTOMER_TABLE}
           WHERE dt = '{dt}'
         ) c ON t.input_param = c.name
-        WHERE t.dt = '{dt}'
+        WHERE t.dt IN ('{dt}', '{monthly_dt}')
+          AND t.create_time >= '{today_start_str}' AND t.create_time < '{tomorrow_start_str}'
         """).collect()[0]
         non_prepaid_calls = customer_split.non_prepaid_calls or 0
         prepaid_calls = customer_split.prepaid_calls or 0
