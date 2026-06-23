@@ -96,7 +96,7 @@ def get_spark() -> SparkSession:
 
 # ========== 客户公司列表 ==========
 
-def get_company_list(spark, specific_company: str = None, prepaid_filter: bool = False, monthly_day: int = 5, customer_dt: str = None) -> List[str]:
+def get_company_list(spark, specific_company: str = None, prepaid_filter: bool = False, monthly_day: int = 5, customer_dt: str = None, force_all: bool = False) -> List[str]:
     """
     从ads_customer_wide_tab_tmp_df读取公司列表
     customer_dt: 指定客户表分区日期，不指定则自动取MAX(dt)
@@ -104,6 +104,7 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
       月度跑批日期(monthly_day): 处理全部客户(含预付款)
       非月度跑批日期: 仅处理非预付款客户(is_prepaid='否')
     prepaid_filter=False时: 不过滤，处理全部客户
+    force_all=True时: 跳过预付款过滤，强制处理全部客户(初始化模式用)
     """
     if specific_company:
         return [specific_company]
@@ -124,7 +125,9 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
         f"WHERE dt = '{query_dt}' AND name IS NOT NULL AND name != ''"
     )
 
-    if prepaid_filter:
+    if force_all:
+        print(f"[INFO] 初始化模式: 跳过预付款过滤, 处理全部客户 (dt={query_dt})")
+    elif prepaid_filter:
         today = datetime.now().day
         if today != monthly_day:
             base_sql += " AND is_prepaid = '否'"

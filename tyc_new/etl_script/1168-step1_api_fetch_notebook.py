@@ -15,6 +15,7 @@ INTERFACE_NAME = get_interface_name(CONFIG, INTERFACE_KEY)
 spark = get_spark()
 dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
 CUSTOMER_DT = None  # 指定客户表分区日期，None=自动取MAX(dt)
+INIT_MODE = False  # True=初始化模式:强制全量跑所有客户(含预付款),跳过Phase2
 
 print("=" * 60)
 print(f"【Notebook版】天眼查{INTERFACE_KEY}接口({INTERFACE_NAME}) - API数据拉取")
@@ -22,6 +23,7 @@ print("=" * 60)
 print(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print(f"分区dt: {dt}")
 print(f"客户表分区: {CUSTOMER_DT or '自动(MAX(dt))'}")
+print(f"初始化模式: {INIT_MODE}")
 print(f"重试策略: 无(查询即计费，失败直接返回)")
 print()
 
@@ -124,7 +126,7 @@ def process_company(keyword):
 # ========== 执行 ==========
 
 # 频次检查: 根据配置判断今天是否需要调用
-if not should_run_today(CONFIG, INTERFACE_KEY):
+if not should_run_today(CONFIG, INTERFACE_KEY, force_run=INIT_MODE):
     freq = get_api_config(CONFIG, INTERFACE_KEY).get('frequency', 'daily')
     monthly_day = get_monthly_day(CONFIG)
     print(f"[SKIP] {INTERFACE_KEY}接口频次配置为'{freq}', 月度跑批日为每月{monthly_day}号, 今天不是调用日期, 跳过执行")
@@ -132,7 +134,7 @@ else:
     # 预付款过滤 + 获取客户列表
     prepaid_filter = is_prepaid_filter_enabled(CONFIG, INTERFACE_KEY)
     monthly_day = get_monthly_day(CONFIG)
-    companies = get_company_list(spark, prepaid_filter=prepaid_filter, monthly_day=monthly_day, customer_dt=CUSTOMER_DT)
+    companies = get_company_list(spark, prepaid_filter=prepaid_filter, monthly_day=monthly_day, customer_dt=CUSTOMER_DT, force_all=INIT_MODE)
     if not companies:
         print("[WARNING] 没有获取到公司列表，任务结束")
     else:
@@ -161,7 +163,7 @@ monthly_day = get_monthly_day(CONFIG)
 last_batch_date = get_last_monthly_batch_date(CONFIG)
 supp_companies = get_supplementary_prepaid_companies(spark, INTERFACE_KEY, monthly_day, customer_dt=CUSTOMER_DT)
 
-if supp_companies:
+if supp_companies and not INIT_MODE:
     print(f"\n{'=' * 60}")
     print(f"【补充跑批】新增预付款客户 - 写入月度分区dt={last_batch_date}")
     print(f"{'=' * 60}")
@@ -179,6 +181,8 @@ if supp_companies:
     dt = original_dt  # 恢复原始dt
 
     print(f"\n补充跑批统计: SUCCESS={supp_stats['SUCCESS']}, FAILED={supp_stats['FAILED']}, SKIP={supp_stats['SKIP_SUCCESS']}")
+elif INIT_MODE:
+    print("\n[补充跑批] 初始化模式，跳过Phase 2")
 else:
     print("\n[补充跑批] 无新增预付款客户需要补充处理")
 
