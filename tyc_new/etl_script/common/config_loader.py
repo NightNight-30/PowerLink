@@ -19,7 +19,7 @@
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List
 
 
@@ -58,9 +58,13 @@ def get_monthly_day(config: Dict) -> int:
 
 def get_last_monthly_batch_date(config) -> str:
     """
-    计算最近月度跑批日的日期(yyyyMMdd格式)
-    今天>=monthly_day: 本月monthly_day(如今天6月17号,月度5号→6月5号=20260605)
-    今天<monthly_day: 上月monthly_day(如今天6月3号,月度5号→5月5号=20260505)
+    计算最近月度跑批日跑批时写入的分区日期(yyyyMMdd格式)
+    月度跑批日(monthly_day)跑批时dt=t-1，所以分区=monthly_day-1
+    今天>=monthly_day: 本月(monthly_day-1) (如今天6月17号,月度5号→6月4号=20260604)
+    今天<monthly_day: 上月(monthly_day-1) (如今天6月3号,月度5号→5月4号=20260504)
+
+    这样月度跑批日正常跑批写入的分区 和 非月度跑批日Phase2补充/初始化写入的分区一致,
+    下游统一读一个分区即可拿到全部数据(月度跑批日跑的+补充的预付款)
     """
     monthly_day = get_monthly_day(config)
     today = datetime.now()
@@ -71,6 +75,8 @@ def get_last_monthly_batch_date(config) -> str:
             batch_date = today.replace(year=today.year - 1, month=12, day=monthly_day)
         else:
             batch_date = today.replace(month=today.month - 1, day=monthly_day)
+    # 月度跑批日跑批写入的是t-1分区,所以减1天
+    batch_date = batch_date - timedelta(days=1)
     return batch_date.strftime('%Y%m%d')
 
 
