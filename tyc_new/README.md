@@ -45,13 +45,27 @@
 
 | 场景 | daily接口 | monthly接口 |
 |:-----|:---------|:-----------|
-| Phase1(月度跑批日) | 全部客户，写t-1分区 | 全部客户，写月度分区 |
+| Phase1(月度跑批日) | 全部客户，写t-1分区 | 全部客户，写t-1分区(=月度跑批日-1) |
 | Phase1(非月度跑批日) | 非预付款客户，写t-1分区 | 不执行 |
-| Phase2(补充) | 新增预付款客户，写月度分区 | 新增预付款客户，写月度分区 |
+| Phase2(补充) | 新增预付款客户，写月度跑批日-1分区 | 新增预付款客户，写月度跑批日-1分区 |
+| INIT_MODE(初始化) | 全部客户(含预付款)，写t-1分区 | 全部客户(含预付款)，写月度跑批日-1分区 |
 
 - **检测**: call record表查最近月度跑批日至今无成功记录的预付款客户
-- **写入**: 补充数据写入最近月度跑批日分区，下游无需改动
+- **写入**: 补充数据写入最近月度跑批日跑批时写入的分区(月度跑批日-1)，与正常月度跑批写入分区一致
 - **防重复**: 月度分区有记录后，下次检测查到 → 跳过
+- **分区统一**: `get_last_monthly_batch_date()` 返回 t-1 分区(monthly_day-1)，保证三种写入路径分区一致
+
+## INIT_MODE 初始化模式
+
+每个 step1 脚本顶部 `INIT_MODE = False` → 改为 `True` 即可全量初始化所有客户：
+
+- **跳过频次检查**: `should_run_today(force_run=True)`，monthly接口非跑批日也能跑
+- **跳过预付款过滤**: `get_company_list(force_all=True)`，处理全部客户(含预付款)
+- **monthly接口dt覆盖**: `if INIT_MODE: dt = get_last_monthly_batch_date(CONFIG)`，写月度跑批日-1分区
+- **保留幂等检查**: 当天已有成功记录的客户仍跳过(避免重复扣费)
+- **跳过 Phase 2**: Phase 1 已全量处理，补充跑批无意义
+
+适用场景: 测试跑部分客户后全量重跑 / 修正历史数据 / 首次初始化
 
 ## 表名格式
 
@@ -161,6 +175,8 @@ MANAGED LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods';
 **Cell 3 - Step2 数据解析** (复制对应接口的step2 notebook脚本)
 
 **自定义分区**: Step1脚本中可设置 `CUSTOMER_DT = '20260614'` 指定客户表分区日期，默认自动取MAX(dt)。
+
+**初始化模式**: Step1脚本顶部 `INIT_MODE = False` → 改为 `True` 可全量跑所有客户(含预付款)，跳过频次检查和Phase 2，monthly接口写月度跑批日-1分区。详见上方"INIT_MODE 初始化模式"章节。
 
 ### 5. 验证
 
