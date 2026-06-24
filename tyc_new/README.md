@@ -67,6 +67,21 @@
 
 适用场景: 测试跑部分客户后全量重跑 / 修正历史数据 / 首次初始化
 
+## HK/TW白名单(免跑接口)
+
+香港/台湾客户(`province_short` 为 `hk`/`tw`)的天眼查/邓白氏接口无意义，识别后加入白名单，所有接口跳过：
+
+- **白名单表**: `powerlink.pw_ods.ods_init_white_company_list_nd` (全量快照，无dt分区)
+- **每日全量重建**: `workflow/ods/build_ods_init_white_company_list_nd.sql`，读昨天819数据，按company_name取最新，过滤hk/tw
+- **Jobs编排**: build_whitelist作为init前置Task，所有step1之前执行
+- **配置**: 每个接口 `exclude_hk_tw: true`(含819)，`is_hk_tw_filter_enabled()` 读取
+- **过滤实现**: `get_company_list(exclude_hk_tw=True)` 读取白名单并排除
+
+**自动识别流程**(白名单从空开始，无需手动切config)：
+- 首次跑批: 白名单空→全部调用→819发现HK/TW→次日build SQL填充白名单
+- 次日起: 已知HK/TW跳过，新客户不在白名单→819调用识别→次日入表
+- HK/TW属性基本不变，所有接口含819都设true，新客户通过"不在白名单"自动被819识别
+
 ## 表名格式
 
 所有ODS表统一格式: `powerlink.pw_ods.ods_{接口类型}_{接口id}_df`

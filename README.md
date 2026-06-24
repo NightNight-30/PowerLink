@@ -113,6 +113,21 @@ Step1内部采用两阶段分离，节省API调用次数：
 
 适用场景: 测试跑部分客户后全量重跑 / 修正历史数据 / 首次初始化
 
+### HK/TW白名单(免跑接口)
+
+香港/台湾客户(`province_short` 为 `hk`/`tw`)的天眼查/邓白氏接口无意义，识别后加入白名单，所有接口跳过：
+
+- **白名单表**: `powerlink.pw_ods.ods_init_white_company_list_nd` (全量快照，无dt分区)
+- **每日全量重建**: `workflow/ods/build_ods_init_white_company_list_nd.sql`，读昨天819数据，按company_name取最新，过滤hk/tw
+- **Jobs编排**: build_whitelist作为init前置Task，所有step1之前执行
+- **配置**: 每个接口 `exclude_hk_tw: true`(含819)，`is_hk_tw_filter_enabled()` 读取
+- **过滤实现**: `get_company_list(exclude_hk_tw=True)` 读取白名单并排除
+
+**自动识别流程**(白名单从空开始，无需手动切config)：
+- 首次跑批: 白名单空→全部调用→819发现HK/TW→次日build SQL填充白名单
+- 次日起: 已知HK/TW跳过，新客户不在白名单→819调用识别→次日入表
+- HK/TW属性基本不变，所有接口含819都设true，新客户通过"不在白名单"自动被819识别
+
 ## 表名格式
 
 所有ODS表: `powerlink.pw_ods.ods_{接口类型}_{接口id}_df`，PARTITIONED BY (dt STRING)
@@ -248,3 +263,4 @@ Step1内部采用两阶段分离，节省API调用次数：
 | 17 | 预警/附件脚本只查 T-1 单分区,漏掉新增预付款客户的补充跑批数据(step2 写入月度跑批日分区) | 改为双分区查询 `dt IN (T-1, 月度跑批日)` + 当天创建时间过滤(`create_time`/`data_create_time ∈ [T, T+1)`),排除月度跑批日跑的历史数据 |
 | 18 | `get_last_monthly_batch_date` 返回月度跑批日当天(20260605),与跑批实际写入的t-1分区(20260604)不一致 | 修正为返回 `monthly_day - 1`(t-1分区),保证正常跑批/Phase2补充/INIT_MODE初始化三者写入分区一致 |
 | 19 | 测试跑部分预付款后需全量重跑,但预付款客户在非月度跑批日会被过滤掉 | 新增 `INIT_MODE=True` 开关:跳过频次检查+预付款过滤,monthly接口写月度跑批日-1分区,跳过Phase2,保留幂等 |
+| 20 | HK/TW客户(province_short为hk/tw)调用tyc/dnb接口无意义浪费配额 | 新增 `ods_init_white_company_list_nd`白名单表 + `exclude_hk_tw`配置(全接口含819默认true) + init前置Task每日全量重建 + 新客户通过不在白名单自动被819识别 |
