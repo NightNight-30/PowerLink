@@ -542,3 +542,17 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_dnb_P51060_df (
 PARTITIONED BY (dt STRING)
 LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_dnb_P51060_df'
 COMMENT '付款指数(邓白氏P51060接口,ODS层)';
+
+-- 13. HK/TW白名单表 (免跑接口的公司列表, 从819解析数据提取)
+-- 全量快照表(无dt分区), 每日由 workflow/ods/build_ods_init_white_company_list_nd.sql 全量重建
+-- 存储province_short为'hk'/'tw'的公司, step1调用前读取此表排除HK/TW客户
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_init_white_company_list_nd (
+  id               BIGINT        COMMENT '自增ID',
+  company_name     STRING        COMMENT 'HK/TW公司名(与客户表name对齐)',
+  province_short   STRING        COMMENT '省份简称(hk或tw)',
+  source_dt        STRING        COMMENT '来源819分区日期',
+  data_create_time TIMESTAMP    COMMENT '819解析时间(取最新一条)',
+  create_time      TIMESTAMP    COMMENT '写入白名单时间'
+) USING DELTA
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_init_white_company_list_nd'
+COMMENT 'HK/TW白名单(免跑tyc/dnb接口的公司,每日全量重建)';

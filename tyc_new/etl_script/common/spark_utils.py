@@ -30,6 +30,7 @@ from pyspark.sql.functions import monotonically_increasing_id, current_timestamp
 CATALOG = 'powerlink'
 SCHEMA = 'pw_ods'
 CUSTOMER_TABLE = f'{CATALOG}.pw_ods.ods_credit_api_input_company_df'
+HK_TW_WHITELIST_TABLE = f'{CATALOG}.{SCHEMA}.ods_init_white_company_list_nd'
 
 MAX_RETRY = 3
 
@@ -96,7 +97,23 @@ def get_spark() -> SparkSession:
 
 # ========== 客户公司列表 ==========
 
-def get_company_list(spark, specific_company: str = None, prepaid_filter: bool = False, monthly_day: int = 5, customer_dt: str = None, force_all: bool = False) -> List[str]:
+def get_hk_tw_whitelist(spark) -> set:
+    """
+    读取HK/TW白名单(免跑接口的公司集合)
+    白名单由 workflow/ods/build_ods_init_white_company_list_nd.sql 每日全量重建
+    读取失败时返回空set(跳过过滤,保证可用性)
+    """
+    try:
+        df = spark.sql(f"SELECT company_name FROM {HK_TW_WHITELIST_TABLE}")
+        whitelist = set([row.company_name for row in df.collect() if row.company_name])
+        print(f"[INFO] 读取HK/TW白名单: {len(whitelist)} 家公司免跑接口")
+        return whitelist
+    except Exception as e:
+        print(f"[WARNING] 读取HK/TW白名单失败({e}), 跳过HK/TW过滤")
+        return set()
+
+
+def get_company_list(spark, specific_company: str = None, prepaid_filter: bool = False, monthly_day: int = 5, customer_dt: str = None, force_all: bool = False, exclude_hk_tw: bool = False) -> List[str]:
     """
     从ads_customer_wide_tab_tmp_df读取公司列表
     customer_dt: 指定客户表分区日期，不指定则自动取MAX(dt)
@@ -105,8 +122,13 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
       非月度跑批日期: 仅处理非预付款客户(is_prepaid='否')
     prepaid_filter=False时: 不过滤，处理全部客户
     force_all=True时: 跳过预付款过滤，强制处理全部客户(初始化模式用)
+    exclude_hk_tw=True时: 读取HK/TW白名单,排除其中的公司(免跑接口)
     """
     if specific_company:
+        # 指定单公司时仍需检查HK/TW白名单(调试时也可能要跳过HK/TW)
+        if exclude_hk_tw and specific_company in get_hk_tw_whitelist(spark):
+            print(f"[SKIP] 指定公司 {specific_company} 在HK/TW白名单中,跳过")
+            return []
         return [specific_company]
 
     if customer_dt:
@@ -138,16 +160,27 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
     df = spark.sql(base_sql)
     companies = sorted([row.name for row in df.collect()])
     print(f"[INFO] 从客户表获取到 {len(companies)} 家公司 (dt={query_dt})")
+
+    # HK/TW白名单过滤(免跑接口的公司)
+    if exclude_hk_tw:
+        whitelist = get_hk_tw_whitelist(spark)
+        if whitelist:
+            before = len(companies)
+            companies = [c for c in companies if c not in whitelist]
+            excluded = before - len(companies)
+            print(f"[INFO] HK/TW过滤: 排除 {excluded} 家HK/TW公司, 剩余 {len(companies)} 家")
+
     return companies
 
 
 # ========== 补充跑批(新增预付款客户) ==========
 
-def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: int, customer_dt: str = None) -> List[str]:
+def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: int, customer_dt: str = None, exclude_hk_tw: bool = False) -> List[str]:
     """
     获取需要补充处理的预付款客户列表
     条件: is_prepaid='是' 且 最近月度跑批日至今无成功调用记录(status_code=0)
     补充处理写入月度跑批日分区，下游无需改动
+    exclude_hk_tw=True时: 排除HK/TW白名单中的公司(免跑接口)
     """
     # 1. 获取客户表分区日期
     if customer_dt:
@@ -184,6 +217,16 @@ def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: 
 
     # 5. 补充 = 预付款 - 已处理
     supplementary = [c for c in prepaid_list if c not in processed_set]
+
+    # 6. HK/TW白名单过滤(免跑接口的公司)
+    if exclude_hk_tw and supplementary:
+        whitelist = get_hk_tw_whitelist(spark)
+        if whitelist:
+            before = len(supplementary)
+            supplementary = [c for c in supplementary if c not in whitelist]
+            excluded = before - len(supplementary)
+            if excluded > 0:
+                print(f"[补充跑批] HK/TW过滤: 排除 {excluded} 家HK/TW公司, 剩余 {len(supplementary)} 家")
 
     if supplementary:
         print(f"[补充跑批] 检测到 {len(supplementary)} 个新增预付款客户需要补充处理 (dt={last_batch_date})")

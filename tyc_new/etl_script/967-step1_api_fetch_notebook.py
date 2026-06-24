@@ -4,7 +4,7 @@
 前置条件: Cell1已执行notebook_init
 """
 
-from common.config_loader import load_config, get_interface_name, get_api_config, should_run_today, is_prepaid_filter_enabled, get_monthly_day, get_last_monthly_batch_date
+from common.config_loader import load_config, get_interface_name, get_api_config, should_run_today, is_prepaid_filter_enabled, get_monthly_day, get_last_monthly_batch_date, is_hk_tw_filter_enabled
 from common.spark_utils import (get_spark, get_company_list, has_success_today, write_api_records, get_supplementary_prepaid_companies, MAX_RETRY)
 import json, requests, traceback
 from datetime import datetime, timedelta
@@ -147,8 +147,9 @@ if not should_run_today(CONFIG, INTERFACE_KEY, force_run=INIT_MODE):
 else:
     # 预付款过滤 + 获取客户列表
     prepaid_filter = is_prepaid_filter_enabled(CONFIG, INTERFACE_KEY)
+    exclude_hk_tw = is_hk_tw_filter_enabled(CONFIG, INTERFACE_KEY)
     monthly_day = get_monthly_day(CONFIG)
-    companies = get_company_list(spark, prepaid_filter=prepaid_filter, monthly_day=monthly_day, customer_dt=CUSTOMER_DT, force_all=INIT_MODE)
+    companies = get_company_list(spark, prepaid_filter=prepaid_filter, monthly_day=monthly_day, customer_dt=CUSTOMER_DT, force_all=INIT_MODE, exclude_hk_tw=exclude_hk_tw)
     if not companies:
         print("[WARNING] 没有获取到公司列表，任务结束")
     else:
@@ -175,7 +176,7 @@ else:
 
 monthly_day = get_monthly_day(CONFIG)
 last_batch_date = get_last_monthly_batch_date(CONFIG)
-supp_companies = get_supplementary_prepaid_companies(spark, INTERFACE_KEY, monthly_day, customer_dt=CUSTOMER_DT)
+supp_companies = get_supplementary_prepaid_companies(spark, INTERFACE_KEY, monthly_day, customer_dt=CUSTOMER_DT, exclude_hk_tw=exclude_hk_tw)
 
 if supp_companies and not INIT_MODE:
     print(f"\n{'=' * 60}")

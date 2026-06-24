@@ -113,6 +113,20 @@ def is_prepaid_filter_enabled(config: Dict, interface_key: str) -> bool:
     return api_config.get('prepaid_filter', False)
 
 
+def is_hk_tw_filter_enabled(config: Dict, interface_key: str) -> bool:
+    """
+    判断接口是否启用HK/TW客户过滤(免跑白名单)
+    exclude_hk_tw=true → 调用前读取白名单排除HK/TW公司(province_short为'hk'/'tw')
+    exclude_hk_tw=false → 不过滤,调用全部客户
+
+    所有接口(含819)默认true: HK/TW属性基本不变,识别后无需重复调用
+    新客户不在白名单中,首次仍会被819调用以识别其HK/TW属性,次日加入白名单后所有接口跳过
+    默认false: 未配置时不过滤,保证向后兼容
+    """
+    api_config = get_api_config(config, interface_key)
+    return api_config.get('exclude_hk_tw', False)
+
+
 def is_charge_per_query(config: Dict, interface_key: str) -> bool:
     """
     判断接口是否为查询即计费模式
