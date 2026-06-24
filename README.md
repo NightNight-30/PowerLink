@@ -62,6 +62,23 @@ PowerLink/
 
 ## 核心架构
 
+### 初始化Task并行
+
+Databricks Jobs中两个初始化Task并行执行，所有12组step1依赖两者都完成：
+
+```
+init (环境初始化)          ods_init.ipynb (数据初始化)
+  sys.path+导入公共模块      ├─ 上游内部数据离线同步(t-1)
+                            ├─ 接口调用客户初始化(客户表)
+                            └─ build_hk_tw_whitelist(HK/TW白名单重建)
+         ↓                              ↓
+         └────── 两个init并行完成 ──────→ 12组step1(并行)
+```
+
+- **init**: 设置sys.path、导入公共模块(环境准备)
+- **ods_init.ipynb**: 同步上游数据 + 构建客户表 + 重建HK/TW白名单(数据准备)
+- **白名单SQL读昨天819数据**，不依赖今天819_step1，可安全并行
+
 ### 两步流水线
 
 每个接口遵循统一的 **Step1(API拉取) → Step2(数据解析)** 流程：
@@ -119,7 +136,7 @@ Step1内部采用两阶段分离，节省API调用次数：
 
 - **白名单表**: `powerlink.pw_ods.ods_init_white_company_list_nd` (全量快照，无dt分区)
 - **每日全量重建**: `workflow/ods/build_ods_init_white_company_list_nd.sql`，读昨天819数据，按company_name取最新，过滤hk/tw
-- **Jobs编排**: build_whitelist作为init前置Task，所有step1之前执行
+- **Jobs编排**: build_hk_tw_whitelist作为ods_init.ipynb的section 5，和init环境脚本并行跑，所有step1之前完成
 - **配置**: 每个接口 `exclude_hk_tw: true`(含819)，`is_hk_tw_filter_enabled()` 读取
 - **过滤实现**: `get_company_list(exclude_hk_tw=True)` 读取白名单并排除
 
@@ -263,4 +280,4 @@ Step1内部采用两阶段分离，节省API调用次数：
 | 17 | 预警/附件脚本只查 T-1 单分区,漏掉新增预付款客户的补充跑批数据(step2 写入月度跑批日分区) | 改为双分区查询 `dt IN (T-1, 月度跑批日)` + 当天创建时间过滤(`create_time`/`data_create_time ∈ [T, T+1)`),排除月度跑批日跑的历史数据 |
 | 18 | `get_last_monthly_batch_date` 返回月度跑批日当天(20260605),与跑批实际写入的t-1分区(20260604)不一致 | 修正为返回 `monthly_day - 1`(t-1分区),保证正常跑批/Phase2补充/INIT_MODE初始化三者写入分区一致 |
 | 19 | 测试跑部分预付款后需全量重跑,但预付款客户在非月度跑批日会被过滤掉 | 新增 `INIT_MODE=True` 开关:跳过频次检查+预付款过滤,monthly接口写月度跑批日-1分区,跳过Phase2,保留幂等 |
-| 20 | HK/TW客户(province_short为hk/tw)调用tyc/dnb接口无意义浪费配额 | 新增 `ods_init_white_company_list_nd`白名单表 + `exclude_hk_tw`配置(全接口含819默认true) + init前置Task每日全量重建 + 新客户通过不在白名单自动被819识别 |
+| 20 | HK/TW客户(province_short为hk/tw)调用tyc/dnb接口无意义浪费配额 | 新增 `ods_init_white_company_list_nd`白名单表 + `exclude_hk_tw`配置(全接口含819默认true) + ods_init.ipynb每日全量重建(和init并行) + 新客户通过不在白名单自动被819识别 |

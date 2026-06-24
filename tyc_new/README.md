@@ -73,7 +73,7 @@
 
 - **白名单表**: `powerlink.pw_ods.ods_init_white_company_list_nd` (全量快照，无dt分区)
 - **每日全量重建**: `workflow/ods/build_ods_init_white_company_list_nd.sql`，读昨天819数据，按company_name取最新，过滤hk/tw
-- **Jobs编排**: build_whitelist作为init前置Task，所有step1之前执行
+- **Jobs编排**: build_hk_tw_whitelist作为ods_init.ipynb的section 5，和init环境脚本并行跑，所有step1之前完成(白名单SQL读昨天819数据，不依赖今天819，可安全并行)
 - **配置**: 每个接口 `exclude_hk_tw: true`(含819)，`is_hk_tw_filter_enabled()` 读取
 - **过滤实现**: `get_company_list(exclude_hk_tw=True)` 读取白名单并排除
 
@@ -176,6 +176,8 @@ MANAGED LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods';
 或通过Repos用git同步。
 
 ### 4. Notebook中运行
+
+Jobs编排: 两个初始化Task并行执行 — `init`(环境) + `ods_init.ipynb`(上游数据同步+客户表+HK/TW白名单)，所有12组step1依赖两者都完成。白名单SQL读昨天819数据，不依赖今天819，可安全并行。
 
 每个接口需要3个cell:
 
