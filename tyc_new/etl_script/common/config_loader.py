@@ -164,7 +164,7 @@ def get_last_prepaid_batch_date(monthly_day: int, prepaid_run_months: List[int])
         if m <= today.month:
             candidate = m
     if candidate is None:
-        # 当前月比所有配置月份都小(如3月,配置[6,12])→取去年最后一个配置月
+        # 当前月比所有配置月份都小(如3月,配置[1,7])→取去年最后一个配置月
         candidate = sorted_months[-1]
         batch_date = datetime(today.year - 1, candidate, monthly_day)
     else:
