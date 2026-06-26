@@ -4,21 +4,21 @@
     "dnb": { "client_key": "<YOUR_DNB_CLIENT_KEY_BASE64>", "client_secret": "<YOUR_DNB_CLIENT_SECRET_BASE64>" }
   },
   "schedule": {
-    "monthly_day": 10
+    "monthly_day": 5
   },
   "apis": {
     "819":   { "name": "企业基本信息（含主要人员）", "url": "http://open.api.tianyancha.com/services/open/ic/baseinfoV3/2.0", "provider": "tyc", "timeout": 30, "frequency": "daily", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": false, "exclude_hk_tw": true },
     "851":   { "name": "欠税公告",                 "url": "http://open.api.tianyancha.com/services/open/mr/ownTax/2.0", "provider": "tyc", "timeout": 30, "frequency": "daily", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": true, "exclude_hk_tw": true },
     "1058":  { "name": "企业天眼风险",             "url": "http://open.api.tianyancha.com/services/open/risk/riskInfo/2.0", "provider": "tyc", "timeout": 30, "frequency": "daily", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": false, "exclude_hk_tw": true },
     "822":   { "name": "变更记录",                 "url": "http://open.api.tianyancha.com/services/open/ic/changeinfo/2.0", "provider": "tyc", "timeout": 30, "frequency": "daily", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": false, "exclude_hk_tw": true },
-    "854":   { "name": "上市公司企业简介",           "url": "http://open.api.tianyancha.com/services/open/stock/companyInfo/2.0", "provider": "tyc", "timeout": 30, "frequency": "monthly", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": false, "exclude_hk_tw": true },
+    "854":   { "name": "上市公司企业简介",           "url": "http://open.api.tianyancha.com/services/open/stock/companyInfo/2.0", "provider": "tyc", "timeout": 30, "frequency": "daily", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": false, "exclude_hk_tw": true },
     "1168":  { "name": "组织机构",                 "url": "http://open.api.tianyancha.com/services/open/ic/companyType/v2", "provider": "tyc", "timeout": 30, "frequency": "daily", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": true, "exclude_hk_tw": true },
     "1149":  { "name": "企业规模",                 "url": "http://open.api.tianyancha.com/services/open/ic/scale", "provider": "tyc", "timeout": 30, "frequency": "daily", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": false, "exclude_hk_tw": true },
     "967":   { "name": "主要指标-年度",             "url": "http://open.api.tianyancha.com/services/open/stock/mainIndex/2.0", "provider": "tyc", "timeout": 30, "frequency": "monthly", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": false, "exclude_hk_tw": true },
     "1114":  { "name": "法律诉讼",                 "url": "http://open.api.tianyancha.com/services/open/jr/lawSuit/3.0", "provider": "tyc", "timeout": 30, "frequency": "daily", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": true, "exclude_hk_tw": true },
     "1041":  { "name": "司法解析",                 "url": "http://open.api.tianyancha.com/services/open/jr/judicialCase/2.0", "provider": "tyc", "timeout": 30, "frequency": "daily", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": true, "exclude_hk_tw": true },
     "973":   { "name": "现金流量表",               "url": "http://open.api.tianyancha.com/services/open/stock/cashFlow/2.0", "provider": "tyc", "timeout": 30, "frequency": "monthly", "prepaid_filter": true, "normal_error_codes": [300000], "charge_per_query": false, "exclude_hk_tw": true },
-    "P51060": { "name": "付款指数（PAYDEX®）",      "url": "https://openapi.dnb.com.cn/v1/api/callDNBInterface", "provider": "dnb", "timeout": 30, "sku_no": "OPSP-10924-21", "api_id": "P51060", "frequency": "monthly", "prepaid_filter": true, "prepaid_run_months": [6, 12], "normal_error_codes": [1, 1021, 2001], "charge_per_query": false, "exclude_hk_tw": true }
+    "P51060": { "name": "付款指数（PAYDEX®）",      "url": "https://openapi.dnb.com.cn/v1/api/callDNBInterface", "provider": "dnb", "timeout": 30, "sku_no": "OPSP-10924-21", "api_id": "P51060", "frequency": "monthly", "prepaid_filter": true, "prepaid_run_months": [1, 7], "normal_error_codes": [1, 1021, 2001], "charge_per_query": false, "exclude_hk_tw": true }
   },
   "error_code_desc": {
     "tyc": {

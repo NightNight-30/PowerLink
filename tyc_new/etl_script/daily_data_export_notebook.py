@@ -10,7 +10,7 @@ Phase 2: 通过 Graph API 邮件发送 ZIP + 解析统计表(账期 vs 预付款
 - 保留策略: {data_export.retention_days} 天滚动窗口
 - 邮件发送: 复用 alert 段的 Graph API 凭据; 邮件体含统计表 + ZIP 作为普通附件
 
-【测试全量月度数据量时】将 EXPORT_DT 改为对应月度跑批日期(如 20260610)即可。
+【测试全量月度数据量时】将 EXPORT_DT 改为对应月度跑批日期(如 20260605)即可。
 """
 
 import os

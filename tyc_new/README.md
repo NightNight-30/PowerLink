@@ -35,7 +35,7 @@
 
 | 层级 | 判断 | 说明 |
 |:-----|:-----|:-----|
-| 1. 频次 | `should_run_today()` | daily=每天跑, monthly=只在月度跑批日(10号)跑 |
+| 1. 频次 | `should_run_today()` | daily=每天跑, monthly=只在月度跑批日(5号)跑 |
 | 2. 预付款过滤 | `is_prepaid_filter_enabled()` | 非月度跑批日只处理非预付款客户(is_prepaid='否') |
 | 3. 幂等 | `has_success_today()` | 当天dt分区已有status_code=0则跳过 |
 
