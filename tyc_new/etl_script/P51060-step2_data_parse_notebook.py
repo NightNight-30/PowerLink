@@ -11,7 +11,7 @@
 
 import json, traceback
 from datetime import datetime, timedelta
-from common.config_loader import load_config, get_interface_name, get_last_monthly_batch_date, get_monthly_day
+from common.config_loader import load_config, get_interface_name, get_last_monthly_batch_date, get_monthly_day, get_prepaid_run_months
 from common.spark_utils import (
     get_spark, get_today_success_records, write_target_data,
     get_target_table_name, null_if_empty, get_supplementary_prepaid_companies
@@ -133,7 +133,8 @@ else:
 
 monthly_day = get_monthly_day(CONFIG)
 last_batch_date = get_last_monthly_batch_date(CONFIG)
-supp_companies = get_supplementary_prepaid_companies(spark, INTERFACE_KEY, monthly_day)
+prepaid_run_months = get_prepaid_run_months(CONFIG, INTERFACE_KEY)
+supp_companies = get_supplementary_prepaid_companies(spark, INTERFACE_KEY, monthly_day, prepaid_run_months=prepaid_run_months)
 
 if supp_companies:
     print(f"\n{'=' * 60}")
