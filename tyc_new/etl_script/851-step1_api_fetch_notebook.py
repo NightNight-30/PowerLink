@@ -21,9 +21,7 @@ spark = get_spark()
 dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
 CUSTOMER_DT = None  # 指定客户表分区日期，None=自动取MAX(dt)
 INIT_MODE = False  # True=初始化模式:强制全量跑所有客户(含预付款),跳过Phase2
-# 初始化模式: monthly接口写入月度分区(下游读月度分区), daily接口保持t-1
-if INIT_MODE:
-    dt = get_last_monthly_batch_date(CONFIG)
+# 851为daily接口(账期每天跑/预付款月度跑批日跑): INIT_MODE写t-1,与819一致,无需月度分区覆盖
 
 print("=" * 60)
 print(f"【Notebook版】天眼查{INTERFACE_KEY}接口({INTERFACE_NAME}) - API数据拉取(含翻页)")

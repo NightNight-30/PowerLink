@@ -10,12 +10,12 @@
 新增:
   - should_run_today(): 根据接口频次配置判断今天是否需要调用
   - is_prepaid_filter_enabled(): 判断接口是否启用预付款客户过滤
-  - get_monthly_day(): 获取月度跑批日期(默认每月10号)
+  - get_monthly_day(): 获取月度跑批日期(默认每月5号)
   - is_charge_per_query(): 判断接口是否查询即计费(1168/1114/851=true)
   - get_normal_error_codes(): 获取接口的正常错误码列表(用于预警分析)
   - get_error_code_desc(): 获取错误码描述映射
   - get_alert_config(): 获取预警邮件配置
-  - get_prepaid_run_months(): 获取预付款半年跑批月份配置(P51060邓白用,[6,12])
+  - get_prepaid_run_months(): 获取预付款半年跑批月份配置(P51060邓白用,[1,7])
   - get_last_prepaid_batch_date(): 计算最近预付款跑批日分区(Phase2 processed_since截止日)
 """
 
@@ -54,16 +54,16 @@ def get_provider_config(config: Dict, provider: str) -> Dict:
 
 
 def get_monthly_day(config: Dict) -> int:
-    """获取月度跑批日期，默认每月10号"""
-    return config.get('schedule', {}).get('monthly_day', 10)
+    """获取月度跑批日期，默认每月5号"""
+    return config.get('schedule', {}).get('monthly_day', 5)
 
 
 def get_last_monthly_batch_date(config) -> str:
     """
     计算最近月度跑批日跑批时写入的分区日期(yyyyMMdd格式)
     月度跑批日(monthly_day)跑批时dt=t-1，所以分区=monthly_day-1
-    今天>=monthly_day: 本月(monthly_day-1) (如今天6月17号,月度10号→6月9号=20260609)
-    今天<monthly_day: 上月(monthly_day-1) (如今天6月3号,月度10号→5月9号=20260509)
+    今天>=monthly_day: 本月(monthly_day-1) (如今天6月17号,月度5号→6月4号=20260604)
+    今天<monthly_day: 上月(monthly_day-1) (如今天6月3号,月度5号→5月4号=20260504)
 
     这样月度跑批日正常跑批写入的分区 和 非月度跑批日Phase2补充/初始化写入的分区一致,
     下游统一读一个分区即可拿到全部数据(月度跑批日跑的+补充的预付款)
@@ -132,10 +132,10 @@ def is_hk_tw_filter_enabled(config: Dict, interface_key: str) -> bool:
 def get_prepaid_run_months(config: Dict, interface_key: str) -> Optional[List[int]]:
     """
     获取接口的预付款客户跑批月份配置(半年跑批接口用)
-    返回月份列表如[6, 12]表示预付款客户仅在6月/12月的月度跑批日调用
+    返回月份列表如[1, 7]表示预付款客户仅在1月/7月的月度跑批日调用
     返回None表示未配置,预付款客户每个跑批日都调用(默认行为,账期每月跑/预付款每月跑)
 
-    适用于: P51060(邓白)配[6,12]→预付款半年跑一次(省配额),账期每月跑
+    适用于: P51060(邓白)配[1,7]→预付款半年跑一次(省配额),账期每月跑
     其他接口不配→预付款每月跑批日跑(原行为)
     """
     api_config = get_api_config(config, interface_key)
@@ -148,14 +148,14 @@ def get_last_prepaid_batch_date(monthly_day: int, prepaid_run_months: List[int])
     返回最近一个prepaid_run_months月份的(monthly_day-1)分区日期(yyyyMMdd)
 
     用于get_supplementary_prepaid_companies判断"上次预付款跑批至今的新增预付款客户":
-      - 半年跑批接口的预付款上次调用在半年边界(如6月/12月跑批日),
+      - 半年跑批接口的预付款上次调用在半年边界(如1月/7月跑批日),
         所以processed_since截止日=最近半年跑批日分区,而非当月跑批日分区
       - 否则会把所有预付款都当成"未处理"(当月跑批日Phase1没跑预付款)
 
-    例: monthly_day=10, prepaid_run_months=[6,12]
-      今天=2026-07-10 → 返回20260609 (最近半年跑批日6月9号分区)
-      今天=2026-03-15 → 返回20251209 (去年12月9号分区,跨年)
-      今天=2026-06-10 → 返回20260609 (当月即半年月,Phase1已跑全部预付款,Phase2无补充)
+    例: monthly_day=5, prepaid_run_months=[1,7]
+      今天=2026-08-10 → 返回20260704 (最近半年跑批日7月4号分区)
+      今天=2026-03-15 → 返回20260104 (今年1月4号分区,1月<=3月)
+      今天=2026-07-05 → 返回20260704 (当月即半年月,Phase1已跑全部预付款,Phase2无补充)
     """
     today = datetime.now()
     sorted_months = sorted(prepaid_run_months)
@@ -164,7 +164,7 @@ def get_last_prepaid_batch_date(monthly_day: int, prepaid_run_months: List[int])
         if m <= today.month:
             candidate = m
     if candidate is None:
-        # 当前月比所有配置月份都小(如3月,配置[6,12])→取去年最后一个配置月
+        # 当前月比所有配置月份都小(如3月,配置[1,7])→取去年最后一个配置月
         candidate = sorted_months[-1]
         batch_date = datetime(today.year - 1, candidate, monthly_day)
     else:
