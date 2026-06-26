@@ -113,7 +113,7 @@ def get_hk_tw_whitelist(spark) -> set:
         return set()
 
 
-def get_company_list(spark, specific_company: str = None, prepaid_filter: bool = False, monthly_day: int = 5, customer_dt: str = None, force_all: bool = False, exclude_hk_tw: bool = False) -> List[str]:
+def get_company_list(spark, specific_company: str = None, prepaid_filter: bool = False, monthly_day: int = 10, customer_dt: str = None, force_all: bool = False, exclude_hk_tw: bool = False, prepaid_run_months: Optional[List[int]] = None) -> List[str]:
     """
     从ads_customer_wide_tab_tmp_df读取公司列表
     customer_dt: 指定客户表分区日期，不指定则自动取MAX(dt)
@@ -123,6 +123,10 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
     prepaid_filter=False时: 不过滤，处理全部客户
     force_all=True时: 跳过预付款过滤，强制处理全部客户(初始化模式用)
     exclude_hk_tw=True时: 读取HK/TW白名单,排除其中的公司(免跑接口)
+    prepaid_run_months: 预付款半年跑批月份(如[6,12])。配了则:
+      - 跑批日在配置月份(6/12月): 处理全部客户(含预付款) — 半年跑一次预付款
+      - 跑批日不在配置月份(其他月): 仅处理非预付款 — 预付款跳过,省配额
+      未配(None): 预付款每个跑批日都跑(原行为)
     """
     if specific_company:
         # 指定单公司时仍需检查HK/TW白名单(调试时也可能要跳过HK/TW)
@@ -150,12 +154,18 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
     if force_all:
         print(f"[INFO] 初始化模式: 跳过预付款过滤, 处理全部客户 (dt={query_dt})")
     elif prepaid_filter:
-        today = datetime.now().day
-        if today != monthly_day:
+        today = datetime.now()
+        is_batch_day = (today.day == monthly_day)
+        # 半年跑批: 预付款仅在配置月份的跑批日跑,其他月份跑批日也只跑账期
+        if is_batch_day and prepaid_run_months is not None and today.month not in prepaid_run_months:
+            is_batch_day = False
+            print(f"[INFO] 半年跑批配置{prepaid_run_months}: 当前{today.month}月非预付款跑批月, 预付款跳过, 仅处理账期客户")
+
+        if not is_batch_day:
             base_sql += " AND is_prepaid = '否'"
-            print(f"[INFO] 预付款过滤启用: 今天不是月度跑批日({monthly_day}号), 仅处理非预付款客户(is_prepaid='否')")
+            print(f"[INFO] 预付款过滤: 仅处理非预付款客户(is_prepaid='否')")
         else:
-            print(f"[INFO] 预付款过滤启用: 今天是月度跑批日({monthly_day}号), 处理全部客户")
+            print(f"[INFO] 预付款过滤: 今天是月度跑批日({monthly_day}号), 处理全部客户(含预付款)")
 
     df = spark.sql(base_sql)
     companies = sorted([row.name for row in df.collect()])
@@ -175,13 +185,24 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
 
 # ========== 补充跑批(新增预付款客户) ==========
 
-def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: int, customer_dt: str = None, exclude_hk_tw: bool = False) -> List[str]:
+def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: int, customer_dt: str = None, exclude_hk_tw: bool = False, prepaid_run_months: Optional[List[int]] = None) -> List[str]:
     """
     获取需要补充处理的预付款客户列表
-    条件: is_prepaid='是' 且 最近月度跑批日至今无成功调用记录(status_code=0)
+    条件: is_prepaid='是' 且 最近预付款跑批日至今无成功调用记录(status_code=0)
     补充处理写入月度跑批日分区，下游无需改动
     exclude_hk_tw=True时: 排除HK/TW白名单中的公司(免跑接口)
+    prepaid_run_months: 预付款半年跑批月份(如[6,12])。配了则:
+      - 非跑批日返回空(Phase2仅跑批日跑catch-up新增预付款,不每天跑)
+      - processed_since截止日=最近半年跑批日分区(非当月跑批日),因为预付款上次调用在半年边界
+      未配(None): 原行为(每天可跑Phase2,processed_since=当月跑批日)
     """
+    # 半年跑批: 非跑批日不跑Phase 2 (仅跑批日catch-up新增预付款,省配额)
+    if prepaid_run_months is not None:
+        today = datetime.now()
+        if today.day != monthly_day:
+            print(f"[补充跑批] 半年跑批配置{prepaid_run_months}: 今天非月度跑批日({monthly_day}号), 跳过Phase 2")
+            return []
+
     # 1. 获取客户表分区日期
     if customer_dt:
         query_dt = customer_dt
@@ -203,11 +224,17 @@ def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: 
         print("[INFO] 无预付款客户，无需补充处理")
         return []
 
-    # 3. 计算最近月度跑批日
-    from common.config_loader import get_last_monthly_batch_date
-    last_batch_date = get_last_monthly_batch_date({'schedule': {'monthly_day': monthly_day}})
+    # 3. 计算processed_since截止日(上次预付款跑批日分区)
+    from common.config_loader import get_last_monthly_batch_date, get_last_prepaid_batch_date
+    if prepaid_run_months is not None:
+        # 半年跑批: 预付款上次调用在半年边界(如6月/12月跑批日),processed_since=最近半年跑批日分区
+        # 否则会把所有预付款都当成"未处理"(当月跑批日Phase1非半年月没跑预付款)
+        last_batch_date = get_last_prepaid_batch_date(monthly_day, prepaid_run_months)
+        print(f"[补充跑批] 半年跑批: processed_since截止日={last_batch_date} (最近预付款跑批分区)")
+    else:
+        last_batch_date = get_last_monthly_batch_date({'schedule': {'monthly_day': monthly_day}})
 
-    # 4. 查询最近月度跑批日至今已成功处理的预付款客户
+    # 4. 查询processed_since至今已成功处理的预付款客户
     call_record_table = get_api_record_table(interface_key)
     processed_since = spark.sql(
         f"SELECT DISTINCT input_param FROM {call_record_table} "
@@ -235,7 +262,7 @@ def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: 
         else:
             print(f"  补充客户(前10): {supplementary[:10]}...")
     else:
-        print(f"[补充跑批] 所有预付款客户已在月度跑批日({last_batch_date})处理，无需补充")
+        print(f"[补充跑批] 所有预付款客户已在最近跑批日({last_batch_date})处理，无需补充")
 
     return supplementary
 

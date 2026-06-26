@@ -98,7 +98,7 @@ Step1内部采用两阶段分离，节省API调用次数：
 
 | 层级 | 判断 | 说明 |
 |:-----|:-----|:-----|
-| 1. 频次 | `should_run_today()` | daily=每天跑, monthly=只在月度跑批日(5号)跑 |
+| 1. 频次 | `should_run_today()` | daily=每天跑, monthly=只在月度跑批日(10号)跑 |
 | 2. 预付款过滤 | `is_prepaid_filter_enabled()` | 非月度跑批日只处理非预付款客户(is_prepaid='否') |
 | 3. 幂等 | `has_success_today()` | 当天dt分区已有status_code=0则跳过 |
 
@@ -201,7 +201,7 @@ Step1内部采用两阶段分离，节省API调用次数：
 | 配置块 | 说明 |
 |:-------|:-----|
 | `providers` | 天眼查token / 邓白氏client_key+client_secret |
-| `schedule.monthly_day` | 月度跑批日(默认5号) |
+| `schedule.monthly_day` | 月度跑批日(默认10号) |
 | `apis.*` | 各接口URL/频次/计费/预付款过滤/正常错误码 |
 | `alert` | 预警邮件+数据附件邮件(Graph API认证+`cloud`字段+收件人+logo路径) |
 | `data_export` | 每日数据导出配置(输出目录`base_dir`+保留天数`retention_days`) |
@@ -278,6 +278,6 @@ Step1内部采用两阶段分离，节省API调用次数：
 | 15 | 预警邮件彩带"很粗" — 裸CSS `td{padding:8px}` 污染了布局表，2px彩带被撑成~18px | CSS选择器加 `.data` 前缀，数据表加 `class="data"` |
 | 16 | 1058表 `company_name` 是API返回的风险相关公司，不是客户公司 | LEFT JOIN 客户表用 `main_company_name`(搜索入参=客户公司) |
 | 17 | 预警/附件脚本只查 T-1 单分区,漏掉新增预付款客户的补充跑批数据(step2 写入月度跑批日分区) | 改为双分区查询 `dt IN (T-1, 月度跑批日)` + 当天创建时间过滤(`create_time`/`data_create_time ∈ [T, T+1)`),排除月度跑批日跑的历史数据 |
-| 18 | `get_last_monthly_batch_date` 返回月度跑批日当天(20260605),与跑批实际写入的t-1分区(20260604)不一致 | 修正为返回 `monthly_day - 1`(t-1分区),保证正常跑批/Phase2补充/INIT_MODE初始化三者写入分区一致 |
+| 18 | `get_last_monthly_batch_date` 返回月度跑批日当天(20260610),与跑批实际写入的t-1分区(20260609)不一致 | 修正为返回 `monthly_day - 1`(t-1分区),保证正常跑批/Phase2补充/INIT_MODE初始化三者写入分区一致 |
 | 19 | 测试跑部分预付款后需全量重跑,但预付款客户在非月度跑批日会被过滤掉 | 新增 `INIT_MODE=True` 开关:跳过频次检查+预付款过滤,monthly接口写月度跑批日-1分区,跳过Phase2,保留幂等 |
 | 20 | HK/TW客户(province_short为hk/tw)调用tyc/dnb接口无意义浪费配额 | 新增 `ods_init_white_company_list_nd`白名单表 + `exclude_hk_tw`配置(全接口含819默认true) + ods_init.ipynb每日全量重建(和init并行) + 新客户通过不在白名单自动被819识别 |
