@@ -166,6 +166,19 @@ PARTITIONED BY (dt STRING)
 LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_P51060_df'
 COMMENT 'P51060接口调用记录表(ODS层,并发安全)';
 
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_api_call_record_1001_df (
+  id              BIGINT        COMMENT '记录ID(MAX(id)+1自增)',
+  interface_name  STRING        COMMENT '接口名(固定值:工商信息(分公司查总公司))',
+  call_datetime   TIMESTAMP     COMMENT '调用日期时间',
+  input_param     STRING        COMMENT '入参，公司名',
+  status_code     INT           COMMENT '状态码：0=成功，负数=异常(-1=HTTP异常,-2=其他)，正数=API业务错误码',
+  output_result   STRING        COMMENT '出参结果JSON，成功时为API完整响应，失败时为错误信息JSON',
+  create_time     TIMESTAMP     COMMENT '创建时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_api_call_record_1001_df'
+COMMENT '1001接口调用记录表(ODS层,并发安全)';
+
 -- 2. 企业基本信息表 (819接口)
 CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_819_df (
   api_record_id               BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
@@ -516,6 +529,26 @@ PARTITIONED BY (dt STRING)
 LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_973_df'
 COMMENT '现金流量表(973接口,ODS层)';
 
+-- 12.5 工商信息表 (1001接口, 1:1, 分公司查总公司)
+-- 输入分公司名,返回result对象: companyName=分公司名, headquarters=总公司信息对象
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_tyc_1001_df (
+  api_record_id               BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
+  data_create_time            TIMESTAMP     COMMENT '数据创建时间',
+  company_name                STRING        COMMENT '分公司名(result.companyName,即搜索入参)',
+  parent_company_name         STRING        COMMENT '总公司名(result.headquarters.name)',
+  parent_company_id           BIGINT        COMMENT '总公司ID(result.headquarters.id)',
+  parent_company_reg_status   STRING        COMMENT '总公司经营状态(result.headquarters.reg_status)',
+  parent_company_estiblish_time STRING     COMMENT '总公司成立日期(result.headquarters.estiblish_time)',
+  parent_company_reg_capital  STRING        COMMENT '总公司注册资本(result.headquarters.reg_capital)',
+  parent_company_alias        STRING        COMMENT '总公司简称(result.headquarters.alias)',
+  parent_company_logo         STRING        COMMENT '总公司logo(result.headquarters.logo)',
+  parent_company_person_logo  STRING        COMMENT '总公司法人图片(result.headquarters.personLogo)',
+  parent_company_legal_person_name STRING  COMMENT '总公司法人(result.headquarters.legalPersonName)'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_tyc_1001_df'
+COMMENT '工商信息(1001接口,分公司查总公司,1:1,ODS层)';
+
 -- 12. 付款指数表 (邓白氏P51060接口, 1:1)
 CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_dnb_P51060_df (
   api_record_id                 BIGINT        COMMENT 'API调用记录ID(关联ods_api_call_record_df.id)',
@@ -556,3 +589,18 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_init_white_company_list_nd (
 ) USING DELTA
 LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_init_white_company_list_nd'
 COMMENT 'HK/TW白名单(免跑tyc/dnb接口的公司,每日全量重建)';
+
+-- 14. 分公司入参公司表 (1001接口专用,每日由init SQL全量重建dt分区)
+-- 从客户表JOIN 819解析数据(t-1+上月度跑批日预付款合并取update_time最新),过滤company_org_type含'分'
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_credit_api_input_branch_company_df (
+  id               BIGINT        COMMENT '自增ID',
+  company_name     STRING        COMMENT '分公司名(与客户表name对齐,作为1001入参)',
+  is_prepaid       STRING        COMMENT '是否预付款(是/否,来自客户表)',
+  company_org_type STRING        COMMENT '公司类型(819返回companyOrgType,含"分"关键字)',
+  update_time      STRING        COMMENT '819数据更新时间(合并后取最新一条)',
+  source_dt        STRING        COMMENT '来源819分区日期',
+  create_time      TIMESTAMP     COMMENT '写入时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_credit_api_input_branch_company_df'
+COMMENT '分公司入参公司表(1001接口专用,每日全量重建)';

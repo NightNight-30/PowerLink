@@ -38,10 +38,11 @@ spark = get_spark()
 # 是否发送邮件(Phase 2); False 时仅生成 ZIP 不发邮件
 SEND_EMAIL = False
 
-ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041', '1114', '973', 'P51060']
+ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041', '1114', '973', '1001', 'P51060']
 
 # 1:1 / 1:N 数据关系映射 (来源: 各接口 step2 脚本的 is_one_to_one 参数)
-ONE_TO_ONE_INTERFACES = {'819', '854', '1149', '1168', 'P51060'}
+# 1001为1:1(分公司查总公司,返回单个总公司对象), 在1:1集合中
+ONE_TO_ONE_INTERFACES = {'819', '854', '1149', '1168', '1001', 'P51060'}
 
 # 最终输出目录 + 保留天数, 从 config.json 的 data_export 段读取
 _export_cfg = get_data_export_config(CONFIG)

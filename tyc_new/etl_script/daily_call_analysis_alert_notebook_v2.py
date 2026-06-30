@@ -36,7 +36,7 @@ tomorrow_start = today_start + timedelta(days=1)
 today_start_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
 tomorrow_start_str = tomorrow_start.strftime('%Y-%m-%d %H:%M:%S')
 
-ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041','1114', '973', 'P51060']
+ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041','1114', '973', '1001', 'P51060']
 
 print("=" * 60)
 print("【外部数据接口调用分析 & 预警邮件】")
