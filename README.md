@@ -23,8 +23,8 @@ PowerLink/
 │   │   ├── diagnostic_test.py        # 环境诊断
 │   │   ├── daily_call_analysis_alert_notebook_v2.py  # 调用分析预警邮件(V2正式版)
 │   │   ├── daily_data_export_notebook.py            # 每日解析数据导出+邮件附件发送
-│   │   ├── {接口号}-step1_api_fetch_notebook.py   # 12个接口的API拉取
-│   │   └── {接口号}-step2_data_parse_notebook.py  # 12个接口的数据解析
+│   │   ├── {接口号}-step1_api_fetch_notebook.py   # 13个接口的API拉取
+│   │   └── {接口号}-step2_data_parse_notebook.py  # 13个接口的数据解析
 │   └── tools/
 │       ├── verify_schema.py          # 表结构验证
 │       ├── verify_data.py            # 数据质量验证
@@ -38,7 +38,7 @@ PowerLink/
 
 ## 接口总览
 
-### 天眼查(12个接口)
+### 天眼查(12个接口 + 1001分公司查总公司)
 
 | 接口 | 名称 | 频次 | 查询计费 | 翻页 | 数据关系 | prepaid_filter |
 |:-----|:-----|:-----|:---------|:-----|:---------|:--------------|
@@ -53,6 +53,7 @@ PowerLink/
 | 854 | 上市公司企业简介 | daily | 否 | 无 | 1:1+4个Object | 是 |
 | 967 | 主要指标-年度 | monthly | 否 | 无 | 1:N(数组) | 是 |
 | 973 | 现金流量表 | monthly | 否 | 无 | 1:N(数组) | 是 |
+| 1001 | 工商信息(分公司查总公司) | monthly | 否 | 无 | 1:1(result.headquarters总公司) | 否(入参表预过滤) |
 
 ### 邓白氏(1个接口)
 
@@ -64,7 +65,7 @@ PowerLink/
 
 ### 初始化Task并行
 
-Databricks Jobs中两个初始化Task并行执行，所有12组step1依赖两者都完成：
+Databricks Jobs中两个初始化Task并行执行，所有13组step1依赖两者都完成：
 
 ```
 init (环境初始化)          ods_init.ipynb (数据初始化)
@@ -72,7 +73,7 @@ init (环境初始化)          ods_init.ipynb (数据初始化)
                             ├─ 接口调用客户初始化(客户表)
                             └─ build_hk_tw_whitelist(HK/TW白名单重建)
          ↓                              ↓
-         └────── 两个init并行完成 ──────→ 12组step1(并行)
+         └────── 两个init并行完成 ──────→ 13组step1(并行)
 ```
 
 - **init**: 设置sys.path、导入公共模块(环境准备)
@@ -162,6 +163,7 @@ Step1内部采用两阶段分离，节省API调用次数：
 | 1114 | ods_tyc_1114_df | 1:N |
 | 1041 | ods_tyc_1041_df | 1:N |
 | 973 | ods_tyc_973_df | 1:N |
+| 1001 | ods_tyc_1001_df | 1:1 |
 | P51060 | ods_dnb_P51060_df | 1:1 |
 | call record | ods_api_call_record_df | 调用记录 |
 
