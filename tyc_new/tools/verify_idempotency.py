@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 from common.config_loader import load_config, get_interface_name
 from common.spark_utils import get_spark, API_RECORD_TABLE, CATALOG, SCHEMA
 
-INTERFACE_KEYS = ['819', '1058', '822', '854', '1168', '1149', '967', '1114', '973', 'P51060']
+INTERFACE_KEYS = ['819', '1058', '822', '854', '1168', '1149', '967', '1114', '973', '1001', 'P51060']
 
 
 def verify_idempotency(spark, interface_key: str, dt: str):

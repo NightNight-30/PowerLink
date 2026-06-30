@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 
 from common.spark_utils import get_spark, get_target_table_name, CATALOG, SCHEMA, API_RECORD_TABLE
 
-INTERFACE_KEYS = ['819', '1058', '822', '854', '1168', '1149', '967', '1114', '973', 'P51060']
+INTERFACE_KEYS = ['819', '1058', '822', '854', '1168', '1149', '967', '1114', '973', '1001', 'P51060']
 
 
 def verify_api_call_record(spark, dt: str):

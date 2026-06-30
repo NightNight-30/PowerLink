@@ -93,7 +93,7 @@ except Exception as e:
 
 # ========== 测试6: 目标表检查(新表名格式) ==========
 print("\n[测试6] 目标表检查(新表名格式 ods_tyc/ods_dnb_XXX_df)...")
-interface_keys = ['819', '1058', '822', '854', '1168', '1149', '967', '1114', '973', 'P51060']
+interface_keys = ['819', '1058', '822', '854', '1168', '1149', '967', '1114', '973', '1001', 'P51060']
 for key in interface_keys:
     table_name = get_target_table_name(key)
     try:

@@ -31,6 +31,7 @@ CATALOG = 'powerlink'
 SCHEMA = 'pw_ods'
 CUSTOMER_TABLE = f'{CATALOG}.pw_ods.ods_credit_api_input_company_df'
 HK_TW_WHITELIST_TABLE = f'{CATALOG}.{SCHEMA}.ods_init_white_company_list_nd'
+BRANCH_COMPANY_TABLE = f'{CATALOG}.{SCHEMA}.ods_credit_api_input_branch_company_df'
 
 MAX_RETRY = 3
 
@@ -51,6 +52,7 @@ def get_api_record_table(interface_key: str) -> str:
         '1114':  'ods_api_call_record_1114_df',
         '1041':  'ods_api_call_record_1041_df',
         '973':   'ods_api_call_record_973_df',
+        '1001':  'ods_api_call_record_1001_df',
         'P51060': 'ods_api_call_record_P51060_df',
     }
     table_name = record_map.get(interface_key)
@@ -73,6 +75,7 @@ def get_target_table_name(interface_key: str) -> str:
         '1114':  'ods_tyc_1114_df',
         '1041':  'ods_tyc_1041_df',
         '973':   'ods_tyc_973_df',
+        '1001':  'ods_tyc_1001_df',
         'P51060': 'ods_dnb_P51060_df',
     }
     table_name = name_map.get(interface_key)
@@ -183,6 +186,45 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
     return companies
 
 
+def get_branch_company_list(spark, customer_dt: str = None, force_all: bool = False, exclude_hk_tw: bool = False) -> List[str]:
+    """
+    从分公司入参公司表读取分公司列表(1001接口专用)
+    入参表每日由init SQL全量重建,已按company_org_type含'分'过滤+预付款客户JOIN,只含客户表里的分公司
+    customer_dt: 指定入参表分区日期,不指定则自动取MAX(dt)
+    force_all: INIT_MODE用,处理全部分公司(本就处理全部,参数为接口一致)
+    exclude_hk_tw: 排除HK/TW白名单中的公司(免跑接口)
+    1001 prepaid_filter=False,入参表已过滤好,无需再判断预付款
+    """
+    if customer_dt:
+        query_dt = customer_dt
+    else:
+        query_dt = spark.sql(
+            f"SELECT MAX(dt) FROM {BRANCH_COMPANY_TABLE}"
+        ).collect()[0][0]
+
+    if not query_dt:
+        print("[WARNING] 分公司入参表无数据,任务结束")
+        return []
+
+    df = spark.sql(
+        f"SELECT DISTINCT company_name FROM {BRANCH_COMPANY_TABLE} "
+        f"WHERE dt = '{query_dt}' AND company_name IS NOT NULL AND company_name != ''"
+    )
+    companies = sorted([row.company_name for row in df.collect()])
+    print(f"[INFO] 从分公司入参表获取到 {len(companies)} 家分公司 (dt={query_dt})")
+
+    # HK/TW白名单过滤(免跑接口的公司)
+    if exclude_hk_tw:
+        whitelist = get_hk_tw_whitelist(spark)
+        if whitelist:
+            before = len(companies)
+            companies = [c for c in companies if c not in whitelist]
+            excluded = before - len(companies)
+            print(f"[INFO] HK/TW过滤: 排除 {excluded} 家HK/TW公司, 剩余 {len(companies)} 家")
+
+    return companies
+
+
 # ========== 补充跑批(新增预付款客户) ==========
 
 def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: int, customer_dt: str = None, exclude_hk_tw: bool = False, prepaid_run_months: Optional[List[int]] = None) -> List[str]:
@@ -244,6 +286,20 @@ def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: 
 
     # 5. 补充 = 预付款 - 已处理
     supplementary = [c for c in prepaid_list if c not in processed_set]
+
+    # 1001特殊: Phase2只处理"预付款客户 ∩ 分公司入参表"的增量
+    # (1001只跑分公司,非分公司的预付款客户不调用1001)
+    if interface_key == '1001' and supplementary:
+        branch_dt = spark.sql(f"SELECT MAX(dt) FROM {BRANCH_COMPANY_TABLE}").collect()[0][0]
+        if branch_dt:
+            branch_df = spark.sql(
+                f"SELECT DISTINCT company_name FROM {BRANCH_COMPANY_TABLE} "
+                f"WHERE dt = '{branch_dt}' AND is_prepaid = '是'"
+            )
+            branch_set = set([row.company_name for row in branch_df.collect()])
+            before = len(supplementary)
+            supplementary = [c for c in supplementary if c in branch_set]
+            print(f"[补充跑批] 1001分公司过滤: 预付款增量{before}家 ∩ 分公司入参表 → {len(supplementary)}家 (dt={branch_dt})")
 
     # 6. HK/TW白名单过滤(免跑接口的公司)
     if exclude_hk_tw and supplementary:
