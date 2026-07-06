@@ -18,13 +18,19 @@
 | Schema | 硬编码Schema定义 | 从Delta表动态读取schema |
 | 重试逻辑 | 事不过三(API+写入一起重试) | 两阶段分离: API重试 + 写入失败直接终止 |
 
-## 核心设计: 两阶段分离
+## 核心设计: 两阶段分离 + 前置SQL过滤(Phase 2已删除)
 
 **Step1 (API拉取)** 采用两阶段分离，节省API调用次数：
-- **阶段1 - API调用**: 事不过三重试，仅对HTTP请求异常和API业务错误重试
+- **阶段1 - API调用**: 事不过三重试，仅对HTTP请求异常和API业务错误重试;`normal_error_codes`(如300000=非分公司/无数据)为正常业务错误,不重试直接退出
 - **阶段2 - Delta写入**: API成功后才写入，写入失败直接报错终止，**不浪费API调用次数重试写入**
 
 **Step2 (数据解析)** 直接读取成功记录并解析写入，无重试逻辑。
+
+**⛔ Phase 2(补充跑批)已从所有step1删除**:
+- 改为前置SQL(ods_init)标记 `is_new_customer`/`in_monthly_batch` 字段,`get_company_list()` 根据frequency+4字段直接过滤
+- daily非月度跑批日跑"账期+新增预付款",monthly非月度跑批日跑"新增客户且非月度已跑"
+- `should_run_today()` 改为每天都返回True,`get_run_dt()` 统一计算写入分区
+- step2仍保留Phase 2代码(死代码,待清理)
 
 ## 表名格式
 
@@ -43,9 +49,13 @@
 | tyc | 973 | ods_tyc_973_df | 现金流量表 |
 | tyc | 1001 | ods_tyc_1001_df | 工商信息(分公司查总公司) |
 | dnb | P51060 | ods_dnb_P51060_df | 付款指数(邓白氏) |
-| - | - | ods_api_call_record_df | API调用记录(共享) |
-| - | - | ods_credit_api_input_branch_company_df | 分公司入参公司表(1001专用,819-step2后SQL生成) |
-| - | - | ods_credit_api_input_new_customers_df | 新增客户入参表(819+1001定向跑批专用,每日对比分区生成) |
+| - | - | ods_api_call_record_{接口id}_df | 各接口独立调用记录(并发安全,13个Task各写不同表) |
+| - | - | ods_credit_preprocessing_company_list_df | 客户预处理表(sap_code粒度,is_prepaid+account_group_name) |
+| - | - | ods_credit_company_parent_check_df | 总公司检查表(manual_add_flag+parent_company_name+is_new_customer+in_monthly_batch) |
+| - | - | ods_credit_api_input_company_df | 接口调用入参公司表(name+is_prepaid+is_new_customer+in_monthly_batch) |
+| - | - | ods_credit_api_input_branch_company_df | 分公司入参公司表(1001专用,819-step2后SQL生成,已按company_org_type含'分'过滤) |
+| - | - | ods_credit_api_input_new_customers_df | 新增客户入参表(定向1001专用,每日对比分区生成) |
+| - | - | ods_credit_api_white_company_list_nd | HK/TW白名单(免跑接口,每日全量重建,读历史819 dt<=bizdate_1) |
 
 ## 目录结构
 
@@ -163,24 +173,61 @@ CREATE VOLUME IF NOT EXISTS powerlink.default.env;
 3. **dt分区格式**: yyyyMMdd (如20260527)，与客户表ads_customer_wide_tab_tmp_df的dt格式保持一致
 4. **两阶段分离**: API调用重试与Delta写入分离，写入失败不浪费API调用次数
 5. **邓白氏uscc**: 从ods_tyc_819_df读取social_credit_code作为入参
+6. **normal_error_codes**: TYC接口[300000](非分公司/无数据)不重试直接break;邓白氏[1,1021,2001];`.get('normal_error_codes', [])`向后兼容
+7. **get_run_dt**: 统一计算写入分区(daily→t-1, monthly→月度跑批日-1, INIT_MODE+prepaid_run_months→半年跑批日-1)
+8. **各接口独立调用记录表**: `ods_api_call_record_{接口id}_df`,13个Task各写不同表,并发安全
+9. **HK/TW白名单**: `exclude_hk_tw=true`所有接口含819默认过滤,白名单读历史819可和init并行
 
-## 1001分公司查总公司 - 闭环设计(定向跑批,当天覆盖)
+## 1001分公司查总公司 - 闭环设计(3-notebook拆分,定向1001,当天覆盖)
 
-1001接口(分公司查总公司)采用daily频次,与819并行定向跑批新增客户,ods_init读昨天+今天1001分区兜底母公司,当天新增分公司当天拿到母公司,无1天延迟:
+1001接口(分公司查总公司)采用daily频次,定向1001跑新增客户,ods_init_2读昨天+今天1001分区兜底母公司,当天新增分公司当天拿到母公司,无1天延迟。不需要定向819(白名单读历史819,新增非HK/TW客户由全量819兜底)。
+
+**3个ods_init notebook拆分**:
+- **ods_init_1**: 上游同步 + 新增客户表 + 白名单(读历史819 `dt<=bizdate_1`,可和init并行)
+- **ods_init_2**: parent_check + input_company(4.2读 `dt>=昨天` 1001分区兜底,需等定向1001完成)
+- **ods_init_3**: 分公司名单(读当天819+月度跑批日819,需等全量819-step2完成)
 
 **编排顺序**(Databricks Jobs):
-1. **build_ods_credit_api_input_new_customers_df.sql** — 对比`ods_view_account_base_df`今天vs昨天分区(同4.2过滤条件)LEFT ANTI JOIN,生成新增客户入参表dt=今天
-2. **定向819-step1 ‖ 1001-step1**(`--targeted_mode=true`) — 并行跑当天新增客户;819拿企业信息,1001对分公司返回母公司(非分公司返回error/null,免费不扣费,自动过滤)
-3. 819-step2 ‖ 1001-step2 — 并行解析定向跑批结果
-4. **ods_init 4.2**(入参客户信息加载) — `parent_from_1001` CTE读`dt>=昨天`分区(昨天全量+今天定向),规则(`公司.+公司`)匹配不到时用1001母公司兜底,生成当天入参清单
-5. 全量819-step1 → 819-step2 — 跑全量客户(幂等跳过已定向跑的新增客户)
-6. build_ods_credit_api_input_branch_company_df.sql — 从当天819过滤`company_org_type LIKE '%分%'`重建分公司入参表
-7. 全量1001-step1 → 1001-step2 — 跑全量分公司(幂等跳过已定向跑的新增分公司)
+1. **init ‖ ods_init_1** — 并行(环境初始化 + 上游同步+新增客户表+白名单)
+2. **定向 1001-step1 → 1001-step2**(`--targeted_mode=true`) — 只跑1001,不需要定向819;1001对分公司返回母公司,对非分公司返回error/null(`charge_per_query=false`不扣费,`normal_error_codes=[300000]`不重试)
+3. **ods_init_2** — parent_check+input_company,4.2读 `dt>=昨天` 1001分区兜底,生成当天入参清单
+4. **全量 819-step1 → 819-step2** — 跑全量客户(幂等跳过已定向跑的新增客户)
+5. **ods_init_3** — 从当天819+月度跑批日819过滤 `company_org_type LIKE '%分%'` 重建分公司入参表
+6. **全量 1001-step1 → 1001-step2** — 跑全量分公司(幂等跳过已定向跑的新增分公司)
+7. **其他11组step1 → step2** — 并行跑(851/1058/822/854/1168/1149/967/1114/1041/973/P51060)
 
 **闭环说明**:
-- 新增客户识别: `ods_view_account_base_df`今天有但昨天没有的客户(同4.2过滤条件)
-- 定向819‖1001并行: 1001对非分公司返回error/null(`charge_per_query=false`不扣费),`normal_error_codes=[300000]`不重试省时间;parent_check只取`parent_company_name`非空的,自动过滤
-- ods_init兜底: 规则(`公司.+公司`)匹配不到母公司时,从`ods_tyc_1001_df` `dt>=昨天`分区取分公司→总公司映射(`ROW_NUMBER`取每个分公司最新一条)
-- 新分公司当天闭环: 当天识别新增分公司 → 定向1001解析 → ods_init 4.2当天兜底取到母公司,无1天延迟
-- 全量跑幂等: 定向跑过的客户,全量819/1001通过`has_success_today`跳过,不重复调用
+- 新增客户识别: ods_init_1对比 `ods_view_account_base_df` 今天vs昨天分区(同4.2过滤条件)LEFT ANTI JOIN
+- 定向1001(只跑1001): 1001对非分公司返回error/null(`charge_per_query=false`不扣费),`normal_error_codes=[300000]`不重试;parent_check只取`parent_company_name`非空的自动过滤;新增HK/TW客户当天会被调用1次(可接受,次日入白名单后所有接口跳过)
+- ods_init_2兜底: 规则(`公司.+公司`)匹配不到母公司时,从 `ods_tyc_1001_df` `dt>=昨天` 分区取分公司→总公司映射(`ROW_NUMBER`取每个分公司最新一条)
+- 新分公司当天闭环: 当天识别新增分公司 → 定向1001解析 → ods_init_2当天兜底取到母公司,无1天延迟
+- 全量跑幂等: 定向跑过的客户,全量819/1001通过 `has_success_today` 跳过,不重复调用
 - 1001 `prepaid_filter=false`: 入参表已过滤分公司,无需再判断预付款;定向模式不区分预付款,所有新增客户都跑
+
+## 频次与过滤逻辑(Phase 2删除后)
+
+客户表 `ods_credit_api_input_company_df` 4个字段: `name`, `is_prepaid`(是/否), `is_new_customer`(是/否), `in_monthly_batch`(是/否)
+- `is_new_customer`: 今天客户表有但昨天没有(新增客户)
+- `in_monthly_batch`: 在1168最近月度跑批日分区出现过(月度全量已跑,剔除"曾经存在→消失→又回来")
+
+`get_company_list()` 根据 `frequency` + 4字段过滤:
+
+| frequency | 月度跑批日(5号) | 非月度跑批日 |
+| --------- | ------------ | --------- |
+| daily | 全部客户 | 账期 + 新增预付款 (`is_prepaid='否' OR (is_new_customer='是' AND is_prepaid='是')`) |
+| monthly | 全部客户(prepaid_run_months非配置月份时仅账期) | 新增客户且非"曾经存在→消失→又回来" (`is_new_customer='是' AND in_monthly_batch='否'`) |
+
+`get_run_dt()` 统一计算写入分区:
+- daily: t-1 (每天写昨天分区)
+- monthly 月度跑批日: 月度跑批日-1 (当月跑批分区)
+- monthly 非月度跑批日: 最近月度跑批日-1 (新增客户追加到最近月度分区)
+- monthly INIT_MODE + prepaid_run_months: 半年跑批日-1 (P51060预付款init与半年跑批同分区)
+
+## HK/TW白名单(免跑接口)
+
+香港/台湾客户(`province_short` 为 `hk`/`tw`)的天眼查/邓白氏接口无意义,识别后加入白名单,所有接口跳过。
+
+- **白名单表** `ods_credit_api_white_company_list_nd` (全量快照,无dt分区,每日由ods_init_1 section 4重建)
+- **读历史819** `dt <= bizdate_1` (不依赖今天819,可和init并行)
+- **所有接口含819都设 `exclude_hk_tw=true`**: HK/TW属性基本不变,识别后无需重复调用
+- **新客户自动识别**: 新客户不在白名单→首次被819调用识别HK/TW→次日入白名单→所有接口跳过
