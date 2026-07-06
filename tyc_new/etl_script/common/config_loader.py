@@ -8,7 +8,7 @@
   - 环境变量 TYC_CONFIG_PATH 可覆盖
 
 新增:
-  - should_run_today(): 根据接口频次配置判断今天是否需要调用
+  - should_run_today(): daily和monthly每天都跑(monthly非月度跑批日跑新增客户)
   - is_prepaid_filter_enabled(): 判断接口是否启用预付款客户过滤
   - get_monthly_day(): 获取月度跑批日期(默认每月5号)
   - is_charge_per_query(): 判断接口是否查询即计费(1168/1114/851=true)
@@ -16,7 +16,8 @@
   - get_error_code_desc(): 获取错误码描述映射
   - get_alert_config(): 获取预警邮件配置
   - get_prepaid_run_months(): 获取预付款半年跑批月份配置(P51060邓白用,[1,7])
-  - get_last_prepaid_batch_date(): 计算最近预付款跑批日分区(Phase2 processed_since截止日)
+  - get_last_prepaid_batch_date(): 计算最近预付款跑批日分区(P51060 INIT_MODE用)
+  - get_run_dt(): 计算当前运行应写入的分区dt(daily=t-1,monthly=月度跑批日分区)
 """
 
 import json
@@ -58,6 +59,12 @@ def get_monthly_day(config: Dict) -> int:
     return config.get('schedule', {}).get('monthly_day', 5)
 
 
+def is_init_mode(config: Dict) -> bool:
+    """读取全局初始化开关(config顶层init_mode,默认False)
+    初始化时改为True,所有step1脚本统一进入初始化模式:跳过频次检查+预付款过滤+Phase2"""
+    return bool(config.get('init_mode', False))
+
+
 def get_last_monthly_batch_date(config) -> str:
     """
     计算最近月度跑批日跑批时写入的分区日期(yyyyMMdd格式)
@@ -86,21 +93,33 @@ def should_run_today(config: Dict, interface_key: str, force_run: bool = False) 
     """
     根据接口频次配置判断今天是否需要调用
     frequency="daily" → 每天都调用
-    frequency="monthly" → 仅在月度跑批日期调用(schedule.monthly_day)
+    frequency="monthly" → 每天都调用(月度跑批日跑全量,非月度跑批日跑新增客户,过滤逻辑在get_company_list里)
     force_run=True → 强制运行,跳过频次检查(初始化模式用)
     """
     if force_run:
         return True
-    api_config = get_api_config(config, interface_key)
-    frequency = api_config.get('frequency', 'daily')
+    return True
+
+
+def get_run_dt(config: Dict, interface_key: str, init_mode: bool = False) -> str:
+    """
+    计算当前运行应写入的分区dt(yyyyMMdd)
+    daily: t-1 (每天写昨天的分区)
+    monthly:
+      - 月度跑批日: t-1 (= 月度跑批日-1,即当月跑批分区)
+      - 非月度跑批日: last月度跑批日分区(新增客户追加到最近月度分区,下游读MAX(dt)即可)
+      - INIT_MODE + prepaid_run_months: last半年跑批日分区(预付款init数据与半年跑批同分区)
+      - INIT_MODE 其他: last月度跑批日分区(与非月度跑批日一致)
+    """
+    frequency = get_api_config(config, interface_key).get('frequency', 'daily')
     if frequency == 'daily':
-        return True
-    elif frequency == 'monthly':
-        monthly_day = get_monthly_day(config)
-        return datetime.now().day == monthly_day
-    else:
-        print(f"[WARNING] 未知频次配置'{frequency}', 默认按daily处理")
-        return True
+        return (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+
+    monthly_day = get_monthly_day(config)
+    prepaid_run_months = get_prepaid_run_months(config, interface_key)
+    if init_mode and prepaid_run_months is not None:
+        return get_last_prepaid_batch_date(monthly_day, prepaid_run_months)
+    return get_last_monthly_batch_date(config)
 
 
 def is_prepaid_filter_enabled(config: Dict, interface_key: str) -> bool:

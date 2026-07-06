@@ -32,6 +32,7 @@ SCHEMA = 'pw_ods'
 CUSTOMER_TABLE = f'{CATALOG}.pw_ods.ods_credit_api_input_company_df'
 HK_TW_WHITELIST_TABLE = f'{CATALOG}.{SCHEMA}.ods_init_white_company_list_nd'
 BRANCH_COMPANY_TABLE = f'{CATALOG}.{SCHEMA}.ods_credit_api_input_branch_company_df'
+NEW_CUSTOMERS_TABLE = f'{CATALOG}.{SCHEMA}.ods_credit_api_input_new_customers_df'
 
 MAX_RETRY = 3
 
@@ -116,23 +117,23 @@ def get_hk_tw_whitelist(spark) -> set:
         return set()
 
 
-def get_company_list(spark, specific_company: str = None, prepaid_filter: bool = False, monthly_day: int = 5, customer_dt: str = None, force_all: bool = False, exclude_hk_tw: bool = False, prepaid_run_months: Optional[List[int]] = None) -> List[str]:
+def get_company_list(spark, specific_company: str = None, frequency: str = 'daily', monthly_day: int = 5, customer_dt: str = None, force_all: bool = False, exclude_hk_tw: bool = False, prepaid_run_months: Optional[List[int]] = None, prepaid_filter: bool = True) -> List[str]:
     """
-    从ads_customer_wide_tab_tmp_df读取公司列表
-    customer_dt: 指定客户表分区日期，不指定则自动取MAX(dt)
-    prepaid_filter=True时:
-      月度跑批日期(monthly_day): 处理全部客户(含预付款)
-      非月度跑批日期: 仅处理非预付款客户(is_prepaid='否')
-    prepaid_filter=False时: 不过滤，处理全部客户
-    force_all=True时: 跳过预付款过滤，强制处理全部客户(初始化模式用)
-    exclude_hk_tw=True时: 读取HK/TW白名单,排除其中的公司(免跑接口)
-    prepaid_run_months: 预付款半年跑批月份(如[1,7])。配了则:
-      - 跑批日在配置月份(1/7月): 处理全部客户(含预付款) — 半年跑一次预付款
-      - 跑批日不在配置月份(其他月): 仅处理非预付款 — 预付款跳过,省配额
-      未配(None): 预付款每个跑批日都跑(原行为)
+    从 ods_credit_api_input_company_df 读取公司列表
+    表字段: name, is_prepaid(是/否), is_new_customer(是/否), in_monthly_batch(是/否)
+
+    过滤逻辑(Phase 2已删除,所有客户由前置SQL+本函数过滤决定):
+      daily接口 (frequency='daily'):
+        - 月度跑批日: 全部客户
+        - 非月度跑批日: 账期 + 新增预付款 (is_prepaid='否' OR (is_new_customer='是' AND is_prepaid='是'))
+      monthly接口 (frequency='monthly'):
+        - 月度跑批日: 全部客户 (prepaid_run_months非配置月份时仅账期)
+        - 非月度跑批日: 新增客户且非"曾经存在→消失→又回来" (is_new_customer='是' AND in_monthly_batch='否')
+
+    force_all=True (INIT_MODE): 全部客户
+    prepaid_filter=False: 全部客户(向后兼容,1001不调用本函数)
     """
     if specific_company:
-        # 指定单公司时仍需检查HK/TW白名单(调试时也可能要跳过HK/TW)
         if exclude_hk_tw and specific_company in get_hk_tw_whitelist(spark):
             print(f"[SKIP] 指定公司 {specific_company} 在HK/TW白名单中,跳过")
             return []
@@ -155,26 +156,34 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
     )
 
     if force_all:
-        print(f"[INFO] 初始化模式: 跳过预付款过滤, 处理全部客户 (dt={query_dt})")
-    elif prepaid_filter:
+        print(f"[INFO] 初始化模式: 处理全部客户 (dt={query_dt})")
+    elif not prepaid_filter:
+        print(f"[INFO] prepaid_filter=False: 处理全部客户 (dt={query_dt})")
+    else:
         today = datetime.now()
         is_batch_day = (today.day == monthly_day)
-        # 半年跑批: 预付款仅在配置月份的跑批日跑,其他月份跑批日也只跑账期
-        if is_batch_day and prepaid_run_months is not None and today.month not in prepaid_run_months:
-            is_batch_day = False
-            print(f"[INFO] 半年跑批配置{prepaid_run_months}: 当前{today.month}月非预付款跑批月, 预付款跳过, 仅处理账期客户")
 
-        if not is_batch_day:
-            base_sql += " AND is_prepaid = '否'"
-            print(f"[INFO] 预付款过滤: 仅处理非预付款客户(is_prepaid='否')")
+        if frequency == 'daily':
+            if is_batch_day:
+                print(f"[INFO] daily月度跑批日({monthly_day}号): 处理全部客户 (dt={query_dt})")
+            else:
+                base_sql += " AND (is_prepaid = '否' OR (is_new_customer = '是' AND is_prepaid = '是'))"
+                print(f"[INFO] daily非月度跑批日: 账期 + 新增预付款客户 (dt={query_dt})")
         else:
-            print(f"[INFO] 预付款过滤: 今天是月度跑批日({monthly_day}号), 处理全部客户(含预付款)")
+            if is_batch_day:
+                if prepaid_run_months is not None and today.month not in prepaid_run_months:
+                    base_sql += " AND is_prepaid = '否'"
+                    print(f"[INFO] monthly月度跑批日 + 半年跑批配置{prepaid_run_months}: 当前{today.month}月非预付款跑批月, 仅处理账期客户 (dt={query_dt})")
+                else:
+                    print(f"[INFO] monthly月度跑批日({monthly_day}号): 处理全部客户 (dt={query_dt})")
+            else:
+                base_sql += " AND is_new_customer = '是' AND in_monthly_batch = '否'"
+                print(f"[INFO] monthly非月度跑批日: 新增客户(剔除月度跑批日已出现) (dt={query_dt})")
 
     df = spark.sql(base_sql)
     companies = sorted([row.name for row in df.collect()])
     print(f"[INFO] 从客户表获取到 {len(companies)} 家公司 (dt={query_dt})")
 
-    # HK/TW白名单过滤(免跑接口的公司)
     if exclude_hk_tw:
         whitelist = get_hk_tw_whitelist(spark)
         if whitelist:
@@ -189,7 +198,7 @@ def get_company_list(spark, specific_company: str = None, prepaid_filter: bool =
 def get_branch_company_list(spark, customer_dt: str = None, force_all: bool = False, exclude_hk_tw: bool = False) -> List[str]:
     """
     从分公司入参公司表读取分公司列表(1001接口专用)
-    入参表每日由init SQL全量重建,已按company_org_type含'分'过滤+预付款客户JOIN,只含客户表里的分公司
+    入参表每日由819-step2后SQL全量重建,已按company_org_type含'分'过滤+预付款客户JOIN,只含客户表里的分公司
     customer_dt: 指定入参表分区日期,不指定则自动取MAX(dt)
     force_all: INIT_MODE用,处理全部分公司(本就处理全部,参数为接口一致)
     exclude_hk_tw: 排除HK/TW白名单中的公司(免跑接口)
@@ -225,7 +234,42 @@ def get_branch_company_list(spark, customer_dt: str = None, force_all: bool = Fa
     return companies
 
 
-# ========== 补充跑批(新增预付款客户) ==========
+def get_new_customers_list(spark, customer_dt: str = None, exclude_hk_tw: bool = False) -> List[str]:
+    """
+    从新增客户入参表读取新增客户列表(819+1001定向跑批专用,TARGETED_MODE=True时调用)
+    表每日由 build_ods_credit_api_input_new_customers_df.sql 对比今天vs昨天分区生成
+    customer_dt: 指定入参表分区日期,不指定则自动取MAX(dt)
+    exclude_hk_tw: 排除HK/TW白名单中的公司(免跑接口)
+    定向模式不区分预付款,所有新增客户都跑(含预付款)
+    """
+    if customer_dt:
+        query_dt = customer_dt
+    else:
+        query_dt = spark.sql(
+            f"SELECT MAX(dt) FROM {NEW_CUSTOMERS_TABLE}"
+        ).collect()[0][0]
+
+    if not query_dt:
+        print("[WARNING] 新增客户入参表无数据,任务结束")
+        return []
+
+    df = spark.sql(
+        f"SELECT DISTINCT company_name FROM {NEW_CUSTOMERS_TABLE} "
+        f"WHERE dt = '{query_dt}' AND company_name IS NOT NULL AND company_name != ''"
+    )
+    companies = sorted([row.company_name for row in df.collect()])
+    print(f"[INFO] 从新增客户入参表获取到 {len(companies)} 家新增客户 (dt={query_dt})")
+
+    # HK/TW白名单过滤(免跑接口的公司)
+    if exclude_hk_tw:
+        whitelist = get_hk_tw_whitelist(spark)
+        if whitelist:
+            before = len(companies)
+            companies = [c for c in companies if c not in whitelist]
+            excluded = before - len(companies)
+            print(f"[INFO] HK/TW过滤: 排除 {excluded} 家HK/TW公司, 剩余 {len(companies)} 家")
+
+    return companies
 
 def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: int, customer_dt: str = None, exclude_hk_tw: bool = False, prepaid_run_months: Optional[List[int]] = None) -> List[str]:
     """
@@ -286,20 +330,6 @@ def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: 
 
     # 5. 补充 = 预付款 - 已处理
     supplementary = [c for c in prepaid_list if c not in processed_set]
-
-    # 1001特殊: Phase2只处理"预付款客户 ∩ 分公司入参表"的增量
-    # (1001只跑分公司,非分公司的预付款客户不调用1001)
-    if interface_key == '1001' and supplementary:
-        branch_dt = spark.sql(f"SELECT MAX(dt) FROM {BRANCH_COMPANY_TABLE}").collect()[0][0]
-        if branch_dt:
-            branch_df = spark.sql(
-                f"SELECT DISTINCT company_name FROM {BRANCH_COMPANY_TABLE} "
-                f"WHERE dt = '{branch_dt}' AND is_prepaid = '是'"
-            )
-            branch_set = set([row.company_name for row in branch_df.collect()])
-            before = len(supplementary)
-            supplementary = [c for c in supplementary if c in branch_set]
-            print(f"[补充跑批] 1001分公司过滤: 预付款增量{before}家 ∩ 分公司入参表 → {len(supplementary)}家 (dt={branch_dt})")
 
     # 6. HK/TW白名单过滤(免跑接口的公司)
     if exclude_hk_tw and supplementary:
