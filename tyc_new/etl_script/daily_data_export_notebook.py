@@ -26,6 +26,7 @@ from pyspark.sql import functions as F
 from common.config_loader import (
     load_config, get_interface_name, get_api_config,
     get_data_export_config, get_alert_config, get_last_monthly_batch_date,
+    get_monthly_day, get_prepaid_run_months, get_last_prepaid_batch_date,
 )
 from common.spark_utils import get_spark, get_target_table_name, get_api_record_table, CUSTOMER_TABLE
 
@@ -62,6 +63,9 @@ ATTACHMENT_LIMIT = 4 * 1024 * 1024
 run_date = datetime.now().strftime('%Y-%m-%d')
 dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
 monthly_dt = get_last_monthly_batch_date(CONFIG)
+# 半年跑批日-1 (P51060 init模式写入的分区, 非半年月时与monthly_dt不同)
+prepaid_run_months = get_prepaid_run_months(CONFIG, 'P51060')
+half_year_dt = get_last_prepaid_batch_date(get_monthly_day(CONFIG), prepaid_run_months) if prepaid_run_months else monthly_dt
 
 today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 tomorrow_start = today_start + timedelta(days=1)
@@ -71,7 +75,7 @@ tomorrow_start_str = tomorrow_start.strftime('%Y-%m-%d %H:%M:%S')
 print("=" * 60)
 print("【每日解析数据导出 (Phase 1: CSV + ZIP + Phase 2: 邮件)】")
 print("=" * 60)
-print(f"分析日期: {run_date} (数据分区: dt={dt}, 月度分区={monthly_dt})")
+print(f"分析日期: {run_date} (数据分区: dt={dt}, 月度分区={monthly_dt}, 半年分区={half_year_dt})")
 print(f"创建时间窗口: {today_start_str} ~ {tomorrow_start_str}")
 print()
 
@@ -115,6 +119,7 @@ print()
 print(f"[Step 2] 数据分区:")
 print(f"  dt = {dt} (T-1, 账期客户昨天跑批)")
 print(f"  monthly_dt = {monthly_dt} (月度跑批日, 预付款客户/月度接口)")
+print(f"  half_year_dt = {half_year_dt} (半年跑批日, P51060 init模式)")
 print()
 
 day_dir = os.path.join(BASE_DIR, dt)
@@ -137,7 +142,7 @@ def export_interface_csv(spark, interface_key, interface_name, dt, workspace_dir
     # 查 T-1 和月度跑批日两个分区 + 当天解析写入的数据
     cnt = spark.sql(
         f"SELECT COUNT(*) FROM {table} "
-        f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+        f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
         f"AND data_create_time >= '{today_start_str}' AND data_create_time < '{tomorrow_start_str}'"
     ).collect()[0][0]
     if cnt == 0:
@@ -145,7 +150,7 @@ def export_interface_csv(spark, interface_key, interface_name, dt, workspace_dir
 
     df = spark.sql(
         f"SELECT * FROM {table} "
-        f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+        f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
         f"AND data_create_time >= '{today_start_str}' AND data_create_time < '{tomorrow_start_str}'"
     )
 
@@ -228,7 +233,7 @@ def collect_interface_stats(spark, interface_key, interface_name, dt, customer_d
         call_record_table = get_api_record_table(interface_key)
         success_count = spark.sql(
             f"SELECT COUNT(*) FROM {call_record_table} "
-            f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+            f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
             f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
             f"AND status_code = 0"
         ).collect()[0][0]
@@ -238,7 +243,7 @@ def collect_interface_stats(spark, interface_key, interface_name, dt, customer_d
 
     total_count = spark.sql(
         f"SELECT COUNT(*) FROM {table} "
-        f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+        f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
         f"AND data_create_time >= '{today_start_str}' AND data_create_time < '{tomorrow_start_str}'"
     ).collect()[0][0]
     if total_count == 0:
@@ -284,7 +289,7 @@ def collect_interface_stats(spark, interface_key, interface_name, dt, customer_d
       SELECT DISTINCT name, is_prepaid FROM {CUSTOMER_TABLE}
       WHERE dt = '{customer_dt}'
     ) c ON t.{company_col} = c.name
-    WHERE t.dt IN ('{dt}', '{monthly_dt}')
+    WHERE t.dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}')
       AND t.data_create_time >= '{today_start_str}' AND t.data_create_time < '{tomorrow_start_str}'
     """
     r = spark.sql(sql).collect()[0]

@@ -11,7 +11,8 @@
 from common.config_loader import (
     load_config, get_interface_name, get_api_config,
     get_normal_error_codes, get_error_code_desc, get_alert_config,
-    should_run_today, get_monthly_day, get_last_monthly_batch_date, is_charge_per_query
+    should_run_today, get_monthly_day, get_last_monthly_batch_date,
+    get_prepaid_run_months, get_last_prepaid_batch_date, is_charge_per_query
 )
 from common.spark_utils import (
     get_spark, get_api_record_table, CATALOG, SCHEMA, CUSTOMER_TABLE
@@ -28,6 +29,9 @@ spark = get_spark()
 dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
 run_date = datetime.now().strftime('%Y-%m-%d')
 monthly_dt = get_last_monthly_batch_date(CONFIG)
+# 半年跑批日-1 (P51060 init模式写入的分区, 非半年月时与monthly_dt不同)
+prepaid_run_months = get_prepaid_run_months(CONFIG, 'P51060')
+half_year_dt = get_last_prepaid_batch_date(get_monthly_day(CONFIG), prepaid_run_months) if prepaid_run_months else monthly_dt
 
 # 当天创建时间窗口: create_time 在 [今天0点, 明天0点) 之间
 # 用于过滤"今天调用产生的记录", 排除月度跑批日跑的历史数据
@@ -41,7 +45,7 @@ ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967',
 print("=" * 60)
 print("【外部数据接口调用分析 & 预警邮件】")
 print("=" * 60)
-print(f"分析日期: {run_date} (数据分区: dt={dt}, 月度分区={monthly_dt})")
+print(f"分析日期: {run_date} (数据分区: dt={dt}, 月度分区={monthly_dt}, 半年分区={half_year_dt})")
 print(f"创建时间窗口: {today_start_str} ~ {tomorrow_start_str}")
 print()
 
@@ -66,7 +70,7 @@ def get_interface_stats(interface_key):
         # 检查表是否有数据(查 T-1 和月度跑批日两个分区 + 当天创建时间)
         count_result = spark.sql(
             f"SELECT COUNT(*) FROM {table} "
-            f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+            f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
             f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}'"
         ).collect()[0][0]
 
@@ -92,7 +96,7 @@ def get_interface_stats(interface_key):
         # 按status_code分组统计(两分区 + 当天创建时间)
         rows = spark.sql(
             f"SELECT status_code, COUNT(*) as cnt FROM {table} "
-            f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+            f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
             f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
             f"GROUP BY status_code ORDER BY status_code"
         ).collect()
@@ -115,7 +119,7 @@ def get_interface_stats(interface_key):
                 # 获取异常记录的公司名和详情
                 detail_rows = spark.sql(
                     f"SELECT input_param, status_code, output_result FROM {table} "
-                    f"WHERE dt IN ('{dt}', '{monthly_dt}') "
+                    f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
                     f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
                     f"AND status_code = {code}"
                 ).collect()
@@ -152,7 +156,7 @@ def get_interface_stats(interface_key):
           SELECT DISTINCT name, is_prepaid FROM {CUSTOMER_TABLE}
           WHERE dt = '{dt}'
         ) c ON t.input_param = c.name
-        WHERE t.dt IN ('{dt}', '{monthly_dt}')
+        WHERE t.dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}')
           AND t.create_time >= '{today_start_str}' AND t.create_time < '{tomorrow_start_str}'
         """).collect()[0]
         non_prepaid_calls = customer_split.non_prepaid_calls or 0
