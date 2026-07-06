@@ -38,7 +38,7 @@ spark = get_spark()
 # 是否发送邮件(Phase 2); False 时仅生成 ZIP 不发邮件
 SEND_EMAIL = False
 
-ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041', '1114', '973', '1001', 'P51060']
+ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041', '973', '1001', 'P51060']
 
 # 1:1 / 1:N 数据关系映射 (来源: 各接口 step2 脚本的 is_one_to_one 参数)
 # 1001为1:1(分公司查总公司,返回单个总公司对象), 在1:1集合中
@@ -451,7 +451,6 @@ table.data tr:nth-child(even) {{ background-color: #F8F8F8; }}
 </table>
 {brand_bar}
 <p style="color:#5E5E5E; font-size:12px;">
-此邮件由 tesa® 数据团队自动生成，如有疑问请联系 Powerlink.GC@tesa.com<br>
 附件: daily_data_{dt}.zip (各接口解析数据 CSV)
 </p>
 </body></html>"""

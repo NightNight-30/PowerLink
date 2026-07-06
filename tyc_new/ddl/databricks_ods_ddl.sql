@@ -604,3 +604,16 @@ CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_credit_api_input_branch_company_
 PARTITIONED BY (dt STRING)
 LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_credit_api_input_branch_company_df'
 COMMENT '分公司入参公司表(1001接口专用,每日全量重建)';
+
+-- 15. 新增客户入参表 (819+1001定向跑批专用,每日对比分区生成dt分区)
+-- 对比 ods_view_account_base_df 今天vs昨天分区(同过滤条件),LEFT ANTI JOIN 找新增客户
+-- 编排: ods_init 4.2 之前,定向 819‖1001 之前执行
+CREATE TABLE IF NOT EXISTS powerlink.pw_ods.ods_credit_api_input_new_customers_df (
+  id               BIGINT        COMMENT '自增ID(row_number生成)',
+  company_name     STRING        COMMENT '新增客户名(今天有,昨天没有,与客户表name对齐)',
+  is_prepaid       STRING        COMMENT '是否预付款(是/否,来自客户表)',
+  create_time      TIMESTAMP     COMMENT '写入时间'
+) USING DELTA
+PARTITIONED BY (dt STRING)
+LOCATION 'abfss://powerlink@powerlink.dfs.core.chinacloudapi.cn/pw_ods/ods_credit_api_input_new_customers_df'
+COMMENT '新增客户入参表(819+1001定向跑批专用,每日对比分区生成)';

@@ -7,8 +7,8 @@
 翻页逻辑保留，但失败不重试
 """
 
-from common.config_loader import load_config, get_interface_name, get_api_config, should_run_today, is_prepaid_filter_enabled, get_monthly_day, get_last_monthly_batch_date, is_hk_tw_filter_enabled
-from common.spark_utils import (get_spark, get_company_list, has_success_today, write_api_records, get_supplementary_prepaid_companies)
+from common.config_loader import load_config, get_interface_name, get_api_config, should_run_today, is_prepaid_filter_enabled, get_monthly_day, is_hk_tw_filter_enabled, get_run_dt, is_init_mode
+from common.spark_utils import (get_spark, get_company_list, has_success_today, write_api_records)
 import json, requests, traceback
 from datetime import datetime, timedelta
 
@@ -18,10 +18,9 @@ MAX_PAGES = 250
 CONFIG = load_config()
 INTERFACE_NAME = get_interface_name(CONFIG, INTERFACE_KEY)
 spark = get_spark()
-dt = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+INIT_MODE = is_init_mode(CONFIG)
+dt = get_run_dt(CONFIG, INTERFACE_KEY, init_mode=INIT_MODE)
 CUSTOMER_DT = None  # 指定客户表分区日期，None=自动取MAX(dt)
-INIT_MODE = False  # True=初始化模式:强制全量跑所有客户(含预付款),跳过Phase2
-# 851为daily接口(账期每天跑/预付款月度跑批日跑): INIT_MODE写t-1,与819一致,无需月度分区覆盖
 
 print("=" * 60)
 print(f"【Notebook版】天眼查{INTERFACE_KEY}接口({INTERFACE_NAME}) - API数据拉取(含翻页)")
@@ -176,17 +175,17 @@ def process_company(keyword):
 
 # ========== 执行 ==========
 
-# 频次检查: 根据配置判断今天是否需要调用
+# 频次检查: daily和monthly每天都跑(月度跑批日跑全量,非月度跑批日跑新增客户)
 if not should_run_today(CONFIG, INTERFACE_KEY, force_run=INIT_MODE):
     freq = get_api_config(CONFIG, INTERFACE_KEY).get('frequency', 'daily')
     monthly_day = get_monthly_day(CONFIG)
     print(f"[SKIP] {INTERFACE_KEY}接口频次配置为'{freq}', 月度跑批日为每月{monthly_day}号, 今天不是调用日期, 跳过执行")
 else:
-    # 预付款过滤 + 获取客户列表
-    prepaid_filter = is_prepaid_filter_enabled(CONFIG, INTERFACE_KEY)
+    # 获取客户列表: 按frequency+is_prepaid+is_new_customer+in_monthly_batch过滤
+    frequency = get_api_config(CONFIG, INTERFACE_KEY).get('frequency', 'daily')
     exclude_hk_tw = is_hk_tw_filter_enabled(CONFIG, INTERFACE_KEY)
     monthly_day = get_monthly_day(CONFIG)
-    companies = get_company_list(spark, prepaid_filter=prepaid_filter, monthly_day=monthly_day, customer_dt=CUSTOMER_DT, force_all=INIT_MODE, exclude_hk_tw=exclude_hk_tw)
+    companies = get_company_list(spark, frequency=frequency, monthly_day=monthly_day, customer_dt=CUSTOMER_DT, force_all=INIT_MODE, exclude_hk_tw=exclude_hk_tw)
     if not companies:
         print("[WARNING] 没有获取到公司列表，任务结束")
     else:
@@ -208,35 +207,6 @@ else:
         print("=" * 60)
         print(f"\n下一步: 执行 {INTERFACE_KEY}-step2_data_parse.py 解析数据")
 
-
-# ========== Phase 2: 补充跑批(新增预付款客户) ==========
-
-monthly_day = get_monthly_day(CONFIG)
-last_batch_date = get_last_monthly_batch_date(CONFIG)
-supp_companies = get_supplementary_prepaid_companies(spark, INTERFACE_KEY, monthly_day, customer_dt=CUSTOMER_DT, exclude_hk_tw=exclude_hk_tw)
-
-if supp_companies and not INIT_MODE:
-    print(f"\n{'=' * 60}")
-    print(f"【补充跑批】新增预付款客户 - 写入月度分区dt={last_batch_date}")
-    print(f"{'=' * 60}")
-
-    original_dt = dt
-    dt = last_batch_date  # 写入月度跑批日分区
-
-    supp_stats = {'SUCCESS': 0, 'FAILED': 0, 'SKIP_SUCCESS': 0}
-    for i, company in enumerate(supp_companies, 1):
-        print(f"\n[{i}/{len(supp_companies)}] {company} (补充)")
-        print("-" * 60)
-        result = process_company(company)
-        supp_stats[result] += 1
-
-    dt = original_dt  # 恢复原始dt
-
-    print(f"\n补充跑批统计: SUCCESS={supp_stats['SUCCESS']}, FAILED={supp_stats['FAILED']}, SKIP={supp_stats['SKIP_SUCCESS']}")
-elif INIT_MODE:
-    print("\n[补充跑批] 初始化模式，跳过Phase 2")
-else:
-    print("\n[补充跑批] 无新增预付款客户需要补充处理")
 
 # 如需指定单个公司，取消注释下行:
 # companies = ['公司名']

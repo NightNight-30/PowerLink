@@ -36,7 +36,7 @@ tomorrow_start = today_start + timedelta(days=1)
 today_start_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
 tomorrow_start_str = tomorrow_start.strftime('%Y-%m-%d %H:%M:%S')
 
-ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041','1114', '973', '1001', 'P51060']
+ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041', '973', '1001', 'P51060']
 
 print("=" * 60)
 print("【外部数据接口调用分析 & 预警邮件】")
@@ -399,7 +399,6 @@ table.data tr:nth-child(even) {{ background-color: #F8F8F8; }}
 </tr>
 </table>
 <p style="color:#5E5E5E; font-size:12px;">
-此邮件由tesa®数据团队自动生成，如有疑问请联系 Powerlink.GC@tesa.com<br>
 天眼查正常错误码: 300000=经查无结果 | 邓白氏正常错误码: 1=请求无结果, 1021=未收录(暂归正常), 2001=处理失败/参数问题<br>
 天眼查异常错误码: 300001=请求失败, 300002=账号失效, 300003=账号过期, 300004=频率过快,
 300005=无权限, 300006=余额不足, 300007=次数不足, 300008=缺少参数, 300009=账号有误,

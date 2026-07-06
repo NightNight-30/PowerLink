@@ -44,7 +44,8 @@
 | tyc | 1001 | ods_tyc_1001_df | 工商信息(分公司查总公司) |
 | dnb | P51060 | ods_dnb_P51060_df | 付款指数(邓白氏) |
 | - | - | ods_api_call_record_df | API调用记录(共享) |
-| - | - | ods_credit_api_input_branch_company_df | 分公司入参公司表(1001专用,init SQL生成) |
+| - | - | ods_credit_api_input_branch_company_df | 分公司入参公司表(1001专用,819-step2后SQL生成) |
+| - | - | ods_credit_api_input_new_customers_df | 新增客户入参表(819+1001定向跑批专用,每日对比分区生成) |
 
 ## 目录结构
 
@@ -89,7 +90,8 @@ tyc_new/
 │   └── verify_idempotency.py        # 幂等性验证
 ├── workflow/
 │   └── ods/
-│       └── build_ods_credit_api_input_branch_company_df.sql  # 分公司入参表(1001专用,每日init全量重建)
+│       ├── build_ods_credit_api_input_branch_company_df.sql   # 分公司入参表(1001专用,819-step2后全量重建)
+│       └── build_ods_credit_api_input_new_customers_df.sql    # 新增客户入参表(819+1001定向跑批前置,对比今天vs昨天分区)
 └── README.md
 ```
 
@@ -161,3 +163,24 @@ CREATE VOLUME IF NOT EXISTS powerlink.default.env;
 3. **dt分区格式**: yyyyMMdd (如20260527)，与客户表ads_customer_wide_tab_tmp_df的dt格式保持一致
 4. **两阶段分离**: API调用重试与Delta写入分离，写入失败不浪费API调用次数
 5. **邓白氏uscc**: 从ods_tyc_819_df读取social_credit_code作为入参
+
+## 1001分公司查总公司 - 闭环设计(定向跑批,当天覆盖)
+
+1001接口(分公司查总公司)采用daily频次,与819并行定向跑批新增客户,ods_init读昨天+今天1001分区兜底母公司,当天新增分公司当天拿到母公司,无1天延迟:
+
+**编排顺序**(Databricks Jobs):
+1. **build_ods_credit_api_input_new_customers_df.sql** — 对比`ods_view_account_base_df`今天vs昨天分区(同4.2过滤条件)LEFT ANTI JOIN,生成新增客户入参表dt=今天
+2. **定向819-step1 ‖ 1001-step1**(`--targeted_mode=true`) — 并行跑当天新增客户;819拿企业信息,1001对分公司返回母公司(非分公司返回error/null,免费不扣费,自动过滤)
+3. 819-step2 ‖ 1001-step2 — 并行解析定向跑批结果
+4. **ods_init 4.2**(入参客户信息加载) — `parent_from_1001` CTE读`dt>=昨天`分区(昨天全量+今天定向),规则(`公司.+公司`)匹配不到时用1001母公司兜底,生成当天入参清单
+5. 全量819-step1 → 819-step2 — 跑全量客户(幂等跳过已定向跑的新增客户)
+6. build_ods_credit_api_input_branch_company_df.sql — 从当天819过滤`company_org_type LIKE '%分%'`重建分公司入参表
+7. 全量1001-step1 → 1001-step2 — 跑全量分公司(幂等跳过已定向跑的新增分公司)
+
+**闭环说明**:
+- 新增客户识别: `ods_view_account_base_df`今天有但昨天没有的客户(同4.2过滤条件)
+- 定向819‖1001并行: 1001对非分公司返回error/null(`charge_per_query=false`不扣费),`normal_error_codes=[300000]`不重试省时间;parent_check只取`parent_company_name`非空的,自动过滤
+- ods_init兜底: 规则(`公司.+公司`)匹配不到母公司时,从`ods_tyc_1001_df` `dt>=昨天`分区取分公司→总公司映射(`ROW_NUMBER`取每个分公司最新一条)
+- 新分公司当天闭环: 当天识别新增分公司 → 定向1001解析 → ods_init 4.2当天兜底取到母公司,无1天延迟
+- 全量跑幂等: 定向跑过的客户,全量819/1001通过`has_success_today`跳过,不重复调用
+- 1001 `prepaid_filter=false`: 入参表已过滤分公司,无需再判断预付款;定向模式不区分预付款,所有新增客户都跑
