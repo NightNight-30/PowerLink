@@ -45,7 +45,7 @@
 | tyc | 1168 | ods_tyc_1168_df | 组织机构 |
 | tyc | 1149 | ods_tyc_1149_df | 企业规模 |
 | tyc | 967 | ods_tyc_967_df | 主要指标-年度 |
-| tyc | 1114 | ods_tyc_1114_df | 法律诉讼 |
+| tyc | ~~1114~~ | ods_tyc_1114_df | ~~法律诉讼~~ (已弃用) |
 | tyc | 973 | ods_tyc_973_df | 现金流量表 |
 | tyc | 1001 | ods_tyc_1001_df | 工商信息(分公司查总公司) |
 | dnb | P51060 | ods_dnb_P51060_df | 付款指数(邓白氏) |
@@ -86,8 +86,8 @@ tyc_new/
 │   ├── 1149-step2_data_parse_notebook.py  # 企业规模 - 数据解析
 │   ├── 967-step1_api_fetch_notebook.py    # 主要指标 - API拉取
 │   ├── 967-step2_data_parse_notebook.py   # 主要指标 - 数据解析
-│   ├── 1114-step1_api_fetch_notebook.py   # 法律诉讼(含翻页) - API拉取
-│   ├── 1114-step2_data_parse_notebook.py  # 法律诉讼 - 数据解析
+│   ├── 1114-step1_api_fetch_notebook.py   # 法律诉讼(含翻页) - API拉取 (已弃用)
+│   ├── 1114-step2_data_parse_notebook.py  # 法律诉讼 - 数据解析 (已弃用)
 │   ├── 973-step1_api_fetch_notebook.py    # 现金流量表 - API拉取
 │   ├── 973-step2_data_parse_notebook.py   # 现金流量表 - 数据解析
 │   ├── 1001-step1_api_fetch_notebook.py   # 工商信息(分公司查总公司) - API拉取
@@ -194,7 +194,7 @@ CREATE VOLUME IF NOT EXISTS powerlink.default.env;
 4. **全量 819-step1 → 819-step2** — 跑全量客户(幂等跳过已定向跑的新增客户)
 5. **ods_init_3** — 从当天819+月度跑批日819过滤 `company_org_type LIKE '%分%'` 重建分公司入参表
 6. **全量 1001-step1 → 1001-step2** — 跑全量分公司(幂等跳过已定向跑的新增分公司)
-7. **其他11组step1 → step2** — 并行跑(851/1058/822/854/1168/1149/967/1114/1041/973/P51060)
+7. **其他11组step1 → step2** — 并行跑(851/1058/822/854/1168/1149/967/~~1114(已弃用)~~/1041/973/P51060)
 
 **闭环说明**:
 - 新增客户识别: ods_init_1对比 `ods_view_account_base_df` 今天vs昨天分区(同4.2过滤条件)LEFT ANTI JOIN
