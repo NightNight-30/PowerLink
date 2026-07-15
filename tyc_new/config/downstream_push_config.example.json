@@ -1,0 +1,30 @@
+{
+  "_comment": "下游数据推送配置模板。复制为 downstream_push_config.json 后填入实际值。jobs 编排在 ETL 跑完后调用 push_to_downstream_notebook,传入 dt 参数。",
+  "tasks": [
+    {
+      "name": "推送客户信用指标汇总表到下游 MySQL",
+      "enabled": true,
+      "upstream": {
+        "table": "powerlink_uat.pw_ads.ads_pw_credit_metric_df",
+        "dt_field": "dt",
+        "dt_value": "${dt}"
+      },
+      "downstream": {
+        "type": "mysql",
+        "jdbc_url": "jdbc:mysql://<host>:<port>/<db>?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai",
+        "user": "<user>",
+        "password": "<password>",
+        "table": "ads_pw_credit_metric_df",
+        "ddl_path": "ddl/downstream/mysql_ads_pw_credit_metric_df.sql"
+      },
+      "write_options": {
+        "_comment": "pymysql 模式下: batchsize 生效(executemany 批量大小), numPartitions/rewriteBatchedStatements 不生效(pymysql 单连接复用, 自动做 multi-value 重写)",
+        "batchsize": 5000
+      }
+    }
+  ],
+  "audit_log": {
+    "table": "powerlink_uat.pw_ods.ods_downstream_push_audit_log",
+    "enabled": true
+  }
+}

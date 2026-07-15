@@ -10,11 +10,14 @@
 PowerLink/
 ├── tyc_new/                          # ★ 当前活跃版本(Databricks)
 │   ├── config/
-│   │   ├── config.json.example       # 配置模板(频次/预付款/预警邮件)
-│   │   └── tesa_logo.png             # 预警邮件品牌logo
+│   │   ├── config.json.example            # 配置模板(频次/预付款/预警邮件)
+│   │   ├── downstream_push_config.example.json  # 下游推送配置模板
+│   │   └── tesa_logo.png                 # 预警邮件品牌logo
 │   ├── ddl/
-│   │   ├── databricks_ods_ddl.sql    # Delta ODS表DDL
-│   │   └ migrate_api_call_record.sql # 调用记录表DDL
+│   │   ├── databricks_ods_ddl.sql        # Delta ODS表DDL
+│   │   ├── migrate_api_call_record.sql   # 调用记录表DDL
+│   │   └── downstream/
+│   │       └── mysql_ads_pw_credit_metric_df.sql  # 下游MySQL ADS表DDL(推送对齐)
 │   ├── etl_script/
 │   │   ├── common/
 │   │   │   ├── config_loader.py      # 配置加载+频次/预付款/月度跑批日判断
@@ -23,12 +26,19 @@ PowerLink/
 │   │   ├── diagnostic_test.py        # 环境诊断
 │   │   ├── daily_call_analysis_alert_notebook_v2.py  # 调用分析预警邮件(V2正式版)
 │   │   ├── daily_data_export_notebook.py            # 每日解析数据导出+邮件附件发送
+│   │   ├── push_to_downstream_notebook.py           # 下游MySQL推送(pymysql单连接批量插入)
+│   │   ├── test_mysql_connection_notebook.py        # 下游MySQL直连三层测试
 │   │   ├── {接口号}-step1_api_fetch_notebook.py   # 13个接口的API拉取
 │   │   └── {接口号}-step2_data_parse_notebook.py  # 13个接口的数据解析
 │   └── tools/
 │       ├── verify_schema.py          # 表结构验证
 │       ├── verify_data.py            # 数据质量验证
 │       └── verify_idempotency.py     # 幂等性验证
+│
+├── access_to_databricks/            # Access(.accdb)手工数据接入Databricks
+│   ├── push_access_to_blob.py            # 方案A: 应用端服务器推.accdb到Azure Blob
+│   ├── pull_access_from_server_notebook.py # 方案B: Databricks主动SFTP拉取.accdb到Volume
+│   └── blob_connectivity_test.py         # Azure Blob连通性测试(VM侧验证凭证+容器路径)
 │
 ├── etl_script/                       # 旧版MySQL脚本(参考)
 ├── ddl/                              # 旧版MySQL DDL(参考)
@@ -196,6 +206,54 @@ Step1内部采用两阶段分离，节省API调用次数：
 
 详细设计文档存放在 Obsidian `claude变更记录/project/powerlink/其他/数据附件邮件发送设计.md`
 
+## 下游数据推送(Databricks → MySQL)
+
+`push_to_downstream_notebook.py` — ETL 跑完后由 jobs 编排调用,把指定 Delta 表 dt 分区全量推送到下游 MySQL 整表:
+
+- **推送方式**: pymysql 单连接批量插入(`executemany` 自动 multi-value 重写)+ TRUNCATE+INSERT 全量覆盖
+- **自动建表**: 下游表不存在时读 `ddl/downstream/<table>.sql` 自动建(`CREATE TABLE IF NOT EXISTS`)
+- **字段校验**: 上游 Spark schema vs 下游 information_schema.columns,字段名/顺序/类型兼容性校验,不匹配直接报错
+- **审计日志**: `powerlink_uat.pw_ods.ods_downstream_push_audit_log` 记录每次推送任务名/上下游表/dt/行数/状态/耗时/错误信息
+
+**为什么不用 Spark JDBC write**: Spark JDBC `.write.jdbc` 每次 numPartitions 个新连接被 SCC relay 限流不稳定(SELECT 1 通,COUNT(*) 时通时不通);pymysql 单连接复用 + `df.toLocalIterator()` 逐分区拉到 driver 批量插入,稳定不挂。
+
+`test_mysql_connection_notebook.py` — 下游 MySQL 直连三层测试,排查网络/JDBC/pymysql 问题:
+1. driver 侧 TCP 测试(确认 driver 到 MySQL 3306 通)
+2. executor 侧 TCP + MySQL 握手包测试(UDF 在 executor 上 `socket.connect` + `recv` 读 Initial Handshake Packet,验证 SCC relay 把 executor 的包送到 MySQL)
+3. JDBC 测试(`com.mysql:mysql-connector-j:9.0.0` 跑 SELECT 1 + COUNT(*))
+4. pymysql 持久连接测试(UDF 开单连接跑两个查询,再关闭)
+
+**关键依赖**: MySQL 8.4 server 必须用 `com.mysql:mysql-connector-j:9.0.0` 或更高版本 driver(driver 版本 < server 版本会报 `Communications link failure`,实际是协议解析失败)。JDBC URL 需 `useSSL=false&allowPublicKeyRetrieval=true`(MySQL 8 `caching_sha2_password` 必需)。
+
+配置文件: `tyc_new/config/downstream_push_config.example.json`,字段说明见文件内注释。
+
+详细方案文档: Obsidian `claude变更记录/project/powerlink/下游数据推送/下游数据推送方案说明.md`
+
+## Access(.accdb)手工数据接入(应用端推 Blob)
+
+`access_to_databricks/` 三个脚本配合现有 `notebook_merged.py`(UCanAccess JDBC 解析)实现"业务上传 .accdb → Databricks Delta"全自动闭环:
+
+| 脚本 | 运行位置 | 用途 |
+|:-----|:---------|:-----|
+| `push_access_to_blob.py` | 应用端服务器(Python + azure-storage-blob) | 方案A: 扫描本地 .accdb 文件,上传到 abfss blob(对应 UC Volume `manual/access_uploads/`),MD5 写入 blob metadata |
+| `pull_access_from_server_notebook.py` | Databricks notebook(%pip install paramiko) | 方案B: Databricks 主动 SFTP 到服务器,流式算远端 MD5(不全量下载),查 `access_load_meta` 去重,新文件 SFTP get 到 /tmp/ 再 cp 到 Volume |
+| `blob_connectivity_test.py` | 应用端服务器(VM) | 最小连通性测试: 验证 Azure SDK + ACCOUNT_KEY + 容器路径全对,上传 `_connectivity_test.txt` 回读验证 |
+
+**两个方案都复用现有 `notebook_merged.py` 的 MD5 去重**:
+- 方案A: 服务器侧只管推 blob,Databricks 侧 `notebook_merged.py` 扫 Volume + MD5 跳过
+- 方案B: Databricks 侧预查 `access_load_meta` 跳过旧文件(避免无谓 SFTP 下载),新文件入 Volume 后再跑 `notebook_merged.py` 解析
+
+**方案选择**:
+- 方案A(推荐生产): 服务器推 blob,Databricks 不依赖服务器 SSH,解耦最好
+- 方案B(推荐测试): 服务器有 SSH 即可,一个 Databricks notebook + 凭证跑通,Databricks 主动拉
+
+**Volume → Blob 路径映射**:
+- `/Volumes/powerlink_prod/default/env/manual/access_uploads/`(UC Volume 路径)
+- = `abfss://powerlinkprod@powerlinkprod.dfs.core.chinacloudapi.cn/env/manual/access_uploads/`(blob 路径)
+- 容器名 `powerlinkprod`,容器内路径前缀 `env/manual/access_uploads/`
+
+详细操作文档: Obsidian `claude变更记录/project/powerlink/外部数据接入/Access数据接入Databricks操作文档.md`
+
 ## 配置说明
 
 `config.json` 包含以下核心配置(详见 `tyc_new/config/config.json.example`)：
@@ -283,3 +341,11 @@ Step1内部采用两阶段分离，节省API调用次数：
 | 18 | `get_last_monthly_batch_date` 返回月度跑批日当天(20260605),与跑批实际写入的t-1分区(20260604)不一致 | 修正为返回 `monthly_day - 1`(t-1分区),保证正常跑批/Phase2补充/INIT_MODE初始化三者写入分区一致 |
 | 19 | 测试跑部分预付款后需全量重跑,但预付款客户在非月度跑批日会被过滤掉 | 新增 `INIT_MODE=True` 开关:跳过频次检查+预付款过滤,monthly接口写月度跑批日-1分区,跳过Phase2,保留幂等 |
 | 20 | HK/TW客户(province_short为hk/tw)调用tyc/dnb接口无意义浪费配额 | 新增 `ods_init_white_company_list_nd`白名单表 + `exclude_hk_tw`配置(全接口含819默认true) + ods_init.ipynb每日全量重建(和init并行) + 新客户通过不在白名单自动被819识别 |
+| 21 | 下游推送 Spark JDBC write 不稳: `df.write.jdbc` 每次开 numPartitions 个新连接,新连接被 SCC relay 限流,SELECT 1 通但 COUNT(*) 时通时不通 | 推送脚本改 pymysql 单连接批量插入: `df.toLocalIterator()` 逐分区拉到 driver,`executemany` 自动 multi-value 重写,单连接复用稳定不挂 |
+| 22 | MySQL 8.4 server 配 `mysql-connector-j:8.0.33` driver 报 `Communications link failure`(SELECT 1 偶通,COUNT(*) 必失败) | driver 版本必须 ≥ server 版本,装 `com.mysql:mysql-connector-j:9.0.0` + 重启 compute |
+| 23 | Spark Connect 模式(serverless compute) `spark.sparkContext.parallelize` 报 `AttributeError not supported` | 改用 UDF: `spark.range(1).select(udf(lit(...)).alias("v"))` 触发 executor 执行 |
+| 24 | executor 上 `subprocess.check_call(["pip","install","pymysql"])` 超时(SCC relay 外网受限) | notebook 开头 `%pip install pymysql -q`,session 级安装,UDF 直接 import |
+| 25 | MySQL Initial Handshake Packet 解析 `proto_ver=74`(应为 10) | `data[0:4]` 是 4 字节包头(3 字节 payload 长度 + 1 字节 sequence id),`data[4]` 才是协议版本 |
+| 26 | 审计日志 `CANNOT_DETERMINE_TYPE`: `error_msg: None` 导致 `spark.createDataFrame` 类型推断失败 | 默认值 `None` → `''`;`write_audit_log` 包 try/except,审计失败不掩盖推送成功 |
+| 27 | 审计日志 `DELTA_MERGE_INCOMPATIBLE_DATATYPE` IntegerType vs LongType: Python int 默认推断 LongType,DDL 是 INT(IntegerType),Delta merge 不兼容 | 显式 schema,`duration_sec` 用 `IntegerType()` 强制 INT |
+| 28 | Databricks → MySQL 通不等于 Databricks 能读服务器文件: 3306 只是 MySQL 协议端口,读文件需 SSH(22)/SMB(445)/HTTP(80) 等独立协议 + 独立防火墙规则 | Access 文件接入改"服务器推 Azure Blob"(方案A),Databricks 不依赖服务器 SSH,blob→UC Volume 自动可见 |
