@@ -12,7 +12,8 @@ from common.config_loader import (
     load_config, get_interface_name, get_api_config,
     get_normal_error_codes, get_error_code_desc, get_alert_config,
     should_run_today, get_monthly_day, get_last_monthly_batch_date,
-    get_prepaid_run_months, get_last_prepaid_batch_date, is_charge_per_query
+    get_prepaid_run_months, get_last_prepaid_batch_date, is_charge_per_query,
+    get_p1_dt
 )
 from common.spark_utils import (
     get_spark, get_api_record_table, CATALOG, SCHEMA, CUSTOMER_TABLE
@@ -40,7 +41,71 @@ tomorrow_start = today_start + timedelta(days=1)
 today_start_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
 tomorrow_start_str = tomorrow_start.strftime('%Y-%m-%d %H:%M:%S')
 
+# 月度跑批日: 今天 == 每月monthly_day号时为 True
+# 半年跑批日: 今天是 prepaid_run_months 配置的月份 且 == monthly_day号时为 True
+MONTHLY_DAY = get_monthly_day(CONFIG)
+IS_MONTHLY_BATCH_DAY = (datetime.now().day == MONTHLY_DAY)
+PREPAID_RUN_MONTHS = get_prepaid_run_months(CONFIG, 'P51060')
+IS_HALF_YEAR_BATCH_DAY = (
+    PREPAID_RUN_MONTHS is not None
+    and datetime.now().month in PREPAID_RUN_MONTHS
+    and IS_MONTHLY_BATCH_DAY
+)
+
+
+# 各接口的频次配置(账期/预付款分开)
+# 来源: PowerLink 接口调用频次表
+FREQ_DAILY = 'daily'
+FREQ_MONTHLY = 'monthly'
+FREQ_HALF_YEAR = 'half_year'
+
+INTERFACE_FREQUENCY = {
+    # 接口ID: (账期频次, 预付款频次)
+    '819':    (FREQ_DAILY,     FREQ_MONTHLY),
+    '822':    (FREQ_DAILY,     FREQ_MONTHLY),
+    '851':    (FREQ_DAILY,     FREQ_MONTHLY),
+    '854':    (FREQ_DAILY,     FREQ_MONTHLY),
+    '967':    (FREQ_MONTHLY,   FREQ_MONTHLY),
+    '973':    (FREQ_MONTHLY,   FREQ_MONTHLY),
+    '1058':   (FREQ_DAILY,     FREQ_MONTHLY),
+    '1041':   (FREQ_DAILY,     FREQ_MONTHLY),
+    '1149':   (FREQ_DAILY,     FREQ_MONTHLY),
+    '1168':   (FREQ_MONTHLY,   FREQ_MONTHLY),
+    '1001':   (FREQ_DAILY,     FREQ_MONTHLY),
+    'P51060': (FREQ_MONTHLY,   FREQ_HALF_YEAR),
+}
+
+FREQ_LABEL = {
+    FREQ_DAILY:      'Daily',
+    FREQ_MONTHLY:    'Monthly',
+    FREQ_HALF_YEAR:  'Half Year',
+}
+
+
+def is_freq_run_day(freq: str) -> bool:
+    """某频次今天是不是跑批日(有义务出全量数据)。
+
+    - daily: 每天都是跑批日
+    - monthly: 仅月度跑批日(monthly_day号)是跑批日
+    - half_year: 仅半年跑批日(prepaid_run_months月份的monthly_day号)是跑批日
+    """
+    if freq == FREQ_DAILY:
+        return True
+    if freq == FREQ_MONTHLY:
+        return IS_MONTHLY_BATCH_DAY
+    if freq == FREQ_HALF_YEAR:
+        return IS_HALF_YEAR_BATCH_DAY
+    return True
+
 ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041', '973', '1001', 'P51060']
+
+# 分页接口配置(查询即计费+翻页): page_size=每页条数(天眼查API默认20最大20), max_pages=页数上限(代码限制250页/5000条)
+# 851/1041 有翻页, 每家公司合并多页存1行, 需从 output_result 解析 result.total 反推实际页数
+# 1168 查询即计费但无翻页(每家公司1次调用), 不在此配置中
+PAGINATION_CONFIG = {
+    '851': {'page_size': 20, 'max_pages': 250},
+    '1041': {'page_size': 20, 'max_pages': 250},
+}
 
 print("=" * 60)
 print("【外部数据接口调用分析 & 预警邮件】")
@@ -60,17 +125,23 @@ def get_interface_stats(interface_key):
     provider = api_config.get('provider', 'tyc')
     desc_map = get_error_code_desc(CONFIG, provider)
     interface_name = get_interface_name(CONFIG, interface_key)
-    frequency = api_config.get('frequency', 'daily')
     charge_per_query = is_charge_per_query(CONFIG, interface_key)
 
-    # 该接口今天是否应该跑
+    # 该接口今天是否应该跑(legacy: should_run_today 现在恒返回True, 保留兼容)
     should_run = should_run_today(CONFIG, interface_key)
+    # 频次按账期/预付款分别配置
+    non_prepaid_freq, prepaid_freq = INTERFACE_FREQUENCY.get(interface_key, (FREQ_DAILY, FREQ_MONTHLY))
+    non_prepaid_run_day = is_freq_run_day(non_prepaid_freq)
+    prepaid_run_day = is_freq_run_day(prepaid_freq)
+
+    # 用P1分区(Phase 1写入的分区)精准定位,避免查询多余分区
+    p1_dt = get_p1_dt(CONFIG, interface_key, dt, monthly_dt, half_year_dt)
 
     try:
-        # 检查表是否有数据(查 T-1 和月度跑批日两个分区 + 当天创建时间)
+        # 检查表是否有数据(查 P1 分区 + 当天创建时间)
         count_result = spark.sql(
             f"SELECT COUNT(*) FROM {table} "
-            f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
+            f"WHERE dt = '{p1_dt}' "
             f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}'"
         ).collect()[0][0]
 
@@ -79,8 +150,12 @@ def get_interface_stats(interface_key):
                 'interface_key': interface_key,
                 'interface_name': interface_name,
                 'provider': provider,
-                'frequency': frequency,
                 'should_run': should_run,
+                'frequency_display': f"账期: {FREQ_LABEL[non_prepaid_freq]} / 预付: {FREQ_LABEL[prepaid_freq]}",
+                'non_prepaid_freq': non_prepaid_freq,
+                'prepaid_freq': prepaid_freq,
+                'non_prepaid_run_day': non_prepaid_run_day,
+                'prepaid_run_day': prepaid_run_day,
                 'has_data': False,
                 'total': 0,
                 'success': 0,
@@ -93,15 +168,47 @@ def get_interface_stats(interface_key):
                 'abnormal_details': []
             }
 
-        # 按status_code分组统计(两分区 + 当天创建时间)
-        rows = spark.sql(
-            f"SELECT status_code, COUNT(*) as cnt FROM {table} "
-            f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
-            f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
-            f"GROUP BY status_code ORDER BY status_code"
-        ).collect()
+        # 分页接口判断: 查询即计费+有分页配置(851/1041)
+        # 对分页接口, 每条记录(公司)合并多页存1行, 需按页数估算实际API调用次数
+        # 统一口径: 分页接口的 total/success/normal_failure/abnormal_failure/non_prepaid/prepaid 全按页数算
+        is_paginated = charge_per_query and interface_key in PAGINATION_CONFIG
+        if is_paginated:
+            pg = PAGINATION_CONFIG[interface_key]
+            page_size = pg['page_size']
+            max_pages = pg['max_pages']
+            # 每条记录的页数: 成功 = max(1, min(ceil(result.total/page_size), max_pages)), 失败 = 1(第1页就失败)
+            # 用 get_json_object 解析 $.result.total (比 regexp_extract 更稳, 不受SQL字符串转义影响)
+            pages_expr = (
+                f"GREATEST(1, LEAST(CEIL(CAST(COALESCE("
+                f"get_json_object(output_result, '$.result.total'), '0') AS INT) / {page_size}.0), {max_pages}))"
+            )
+            pages_expr_t = (
+                f"GREATEST(1, LEAST(CEIL(CAST(COALESCE("
+                f"get_json_object(t.output_result, '$.result.total'), '0') AS INT) / {page_size}.0), {max_pages}))"
+            )
+        else:
+            pages_expr = None
+            pages_expr_t = None
 
-        total = sum(r.cnt for r in rows)
+        # 按status_code分组统计(P1分区 + 当天创建时间)
+        # 分页接口额外算pages列(实际API调用页数), 非分页接口只算cnt(记录数)
+        if is_paginated:
+            rows = spark.sql(
+                f"SELECT status_code, COUNT(*) as cnt, SUM({pages_expr}) as pages FROM {table} "
+                f"WHERE dt = '{p1_dt}' "
+                f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
+                f"GROUP BY status_code ORDER BY status_code"
+            ).collect()
+        else:
+            rows = spark.sql(
+                f"SELECT status_code, COUNT(*) as cnt FROM {table} "
+                f"WHERE dt = '{p1_dt}' "
+                f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
+                f"GROUP BY status_code ORDER BY status_code"
+            ).collect()
+
+        # 统一取值: 分页接口用pages(实际页数), 非分页用cnt(记录数)
+        total = sum((r.pages if is_paginated else r.cnt) for r in rows)
         success = 0
         normal_failure = 0
         abnormal_failure = 0
@@ -109,17 +216,18 @@ def get_interface_stats(interface_key):
 
         for r in rows:
             code = r.status_code
-            cnt = r.cnt
+            val = r.pages if is_paginated else r.cnt
+            cnt = r.cnt  # 异常详情用cnt(涉及公司数, 展示更直观)
             if code == 0:
-                success = cnt
+                success = val
             elif code in normal_codes:
-                normal_failure += cnt
+                normal_failure += val
             else:
-                abnormal_failure += cnt
+                abnormal_failure += val
                 # 获取异常记录的公司名和详情
                 detail_rows = spark.sql(
                     f"SELECT input_param, status_code, output_result FROM {table} "
-                    f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
+                    f"WHERE dt = '{p1_dt}' "
                     f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
                     f"AND status_code = {code}"
                 ).collect()
@@ -143,31 +251,42 @@ def get_interface_stats(interface_key):
                     'reasons': reason_list[:3]
                 })
 
+        # 调用次数:
+        # - 查询即计费(851/1041/1168): call_count = total (分页接口total已按页数算, 1168每条=1次调用)
+        # - 非查询即计费: call_count = success (只有成功才计费)
         call_count = total if charge_per_query else success
 
-        # 按客户类型(账期/预付款)拆分调用记录数
+        # 按客户类型(账期/预付款)拆分: 分页接口按页数拆, 非分页按记录数拆
         # 客户表统一用 dt=T-1 (最新分区), 关联字段 input_param = name
+        count_expr = pages_expr_t if is_paginated else '1'
         customer_split = spark.sql(f"""
         SELECT
-          SUM(CASE WHEN c.is_prepaid = '否' THEN 1 ELSE 0 END) as non_prepaid_calls,
-          SUM(CASE WHEN c.is_prepaid = '是' THEN 1 ELSE 0 END) as prepaid_calls
+          SUM(CASE WHEN c.is_prepaid = '否' THEN {count_expr} ELSE 0 END) as non_prepaid_calls,
+          SUM(CASE WHEN c.is_prepaid = '是' THEN {count_expr} ELSE 0 END) as prepaid_calls
         FROM {table} t
         LEFT JOIN (
           SELECT DISTINCT name, is_prepaid FROM {CUSTOMER_TABLE}
           WHERE dt = '{dt}'
         ) c ON t.input_param = c.name
-        WHERE t.dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}')
+        WHERE t.dt = '{p1_dt}'
           AND t.create_time >= '{today_start_str}' AND t.create_time < '{tomorrow_start_str}'
         """).collect()[0]
         non_prepaid_calls = customer_split.non_prepaid_calls or 0
         prepaid_calls = customer_split.prepaid_calls or 0
 
+        if is_paginated:
+            print(f"[DEBUG] {interface_key} 分页口径: total={total}, success={success}, normal_failure={normal_failure}, abnormal_failure={abnormal_failure}, non_prepaid={non_prepaid_calls}, prepaid={prepaid_calls}, call_count={call_count}")
+
         return {
             'interface_key': interface_key,
             'interface_name': interface_name,
             'provider': provider,
-            'frequency': frequency,
+            'frequency_display': f"账期: {FREQ_LABEL[non_prepaid_freq]} / 预付: {FREQ_LABEL[prepaid_freq]}",
+            'non_prepaid_freq': non_prepaid_freq,
+            'prepaid_freq': prepaid_freq,
             'should_run': should_run,
+            'non_prepaid_run_day': non_prepaid_run_day,
+            'prepaid_run_day': prepaid_run_day,
             'has_data': True,
             'total': total,
             'success': success,
@@ -186,8 +305,12 @@ def get_interface_stats(interface_key):
             'interface_key': interface_key,
             'interface_name': interface_name,
             'provider': provider,
-            'frequency': frequency,
+            'frequency_display': f"账期: {FREQ_LABEL[non_prepaid_freq]} / 预付: {FREQ_LABEL[prepaid_freq]}",
+            'non_prepaid_freq': non_prepaid_freq,
+            'prepaid_freq': prepaid_freq,
             'should_run': should_run,
+            'non_prepaid_run_day': non_prepaid_run_day,
+            'prepaid_run_day': prepaid_run_day,
             'has_data': False,
             'error': str(e),
             'total': 0, 'success': 0, 'normal_failure': 0, 'abnormal_failure': 0,
@@ -206,12 +329,20 @@ for ik in ALL_INTERFACE_KEYS:
     if stat['total'] > 0:
         status_tag = "✅" if stat['abnormal_failure'] == 0 else "⚠️"
         run_tag = ""
-    elif not stat['should_run']:
-        status_tag = "—"
-        run_tag = " [未跑批]"
     else:
-        status_tag = "⚠️"
-        run_tag = " [无数据]"
+        # 没数据: 分别看账期/预付款今天是不是跑批日
+        # 只要有一类客户今天是跑批日且没数据, 就算异常
+        missing_batches = []
+        if stat['non_prepaid_run_day']:
+            missing_batches.append('账期')
+        if stat['prepaid_run_day']:
+            missing_batches.append('预付')
+        if missing_batches:
+            status_tag = "⚠️"
+            run_tag = f" [无数据-{'/'.join(missing_batches)}]"
+        else:
+            status_tag = "✅"
+            run_tag = ""
     print(f"  {status_tag} {ik}({stat['interface_name']}): "
           f"总计={stat['total']} (账期={stat['non_prepaid_calls']}/预付={stat['prepaid_calls']}), "
           f"成功={stat['success']}, "
@@ -223,9 +354,13 @@ print()
 
 # ========== 3. 判断是否需要预警 ==========
 
-# 有异常失败 或 跑批数据异常时需要预警
+# 有异常失败 或 跑批日数据缺失时需要预警
+# 跑批日数据缺失: 账期客户今天该跑但没数据, 或预付款客户今天该跑但没数据
 has_abnormal = any(s['abnormal_failure'] > 0 for s in all_stats)
-has_no_data_for_run = any(s['should_run'] and not s['has_data'] for s in all_stats)
+has_no_data_for_run = any(
+    (s['non_prepaid_run_day'] or s['prepaid_run_day']) and not s['has_data']
+    for s in all_stats
+)
 need_alert = has_abnormal or has_no_data_for_run
 
 print(f"预警判断: 异常失败={has_abnormal}, 数据缺失={has_no_data_for_run} → 需要预警={need_alert}")
@@ -317,14 +452,18 @@ table.data tr:nth-child(even) {{ background-color: #F8F8F8; }}
 
     for s in stats_list:
         if s['total'] > 0:
-            run_tag = ""
             status_str = "✅ 正常" if s['abnormal_failure'] == 0 else '<span class="warn">⚠️ 异常</span>'
-        elif not s['should_run']:
-            run_tag = '<span class="no-run">[未跑批]</span>'
-            status_str = '<span class="no-run">— 未跑批</span>'
         else:
-            run_tag = ""
-            status_str = '<span class="warn">⚠️ 无数据</span>'
+            # 无数据: 看今天是不是跑批日(账期/预付款分别判断)
+            missing_batches = []
+            if s['non_prepaid_run_day']:
+                missing_batches.append('账期')
+            if s['prepaid_run_day']:
+                missing_batches.append('预付')
+            if missing_batches:
+                status_str = f'<span class="warn">⚠️ 无数据({"+".join(missing_batches)})</span>'
+            else:
+                status_str = "✅ 正常"
 
         abnormal_class = ' class="warn"' if s['abnormal_failure'] > 0 else ''
         html += f"""
@@ -332,7 +471,7 @@ table.data tr:nth-child(even) {{ background-color: #F8F8F8; }}
 <td>{s['interface_key']}</td>
 <td>{s['interface_name']}</td>
 <td>{s['provider']}</td>
-<td>{s['frequency']}{run_tag}</td>
+<td>{s['frequency_display']}</td>
 <td>{s['total']}</td>
 <td class="normal">{s['non_prepaid_calls']}</td>
 <td>{s['prepaid_calls']}</td>
@@ -374,13 +513,21 @@ table.data tr:nth-child(even) {{ background-color: #F8F8F8; }}
                 html += "<br>"
             html += "</div>\n"
 
-    # 未跑批的接口说明
-    no_run_interfaces = [s for s in stats_list if s['total'] == 0 and not s['should_run']]
+    # 无数据的接口说明(账期/预付款都不是今天跑批日, 没数据是正常的)
+    no_run_interfaces = [
+        s for s in stats_list
+        if s['total'] == 0 and not s['non_prepaid_run_day'] and not s['prepaid_run_day']
+    ]
     if no_run_interfaces:
-        html += "<h3>未跑批接口</h3>\n<p>"
+        html += "<h3>今日非跑批日接口</h3>\n<p>"
         monthly_day = get_monthly_day(CONFIG)
         for s in no_run_interfaces:
-            html += f"{s['interface_key']}({s['interface_name']}) - 频次为{ s['frequency']}, 月度跑批日为每月{monthly_day}号<br>"
+            html += f"{s['interface_key']}({s['interface_name']}) - {s['frequency_display']}, 月度跑批日为每月{monthly_day}号"
+            # 邓白氏 P51060 预付款频次为半年, 额外说明半年度跑批日
+            if s['prepaid_freq'] == FREQ_HALF_YEAR and PREPAID_RUN_MONTHS:
+                months_str = "和".join(f"{m}月" for m in PREPAID_RUN_MONTHS)
+                html += f", 半年度跑批日为{months_str}的{monthly_day}号"
+            html += "<br>"
         html += "</p>\n"
 
     # 正常失败说明

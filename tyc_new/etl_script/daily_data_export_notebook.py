@@ -27,6 +27,7 @@ from common.config_loader import (
     load_config, get_interface_name, get_api_config,
     get_data_export_config, get_alert_config, get_last_monthly_batch_date,
     get_monthly_day, get_prepaid_run_months, get_last_prepaid_batch_date,
+    get_p1_dt,
 )
 from common.spark_utils import get_spark, get_target_table_name, get_api_record_table, CUSTOMER_TABLE
 
@@ -37,13 +38,46 @@ spark = get_spark()
 # ========== 可调参数 ==========
 
 # 是否发送邮件(Phase 2); False 时仅生成 ZIP 不发邮件
-SEND_EMAIL = False
+SEND_EMAIL = True
 
 ALL_INTERFACE_KEYS = ['819', '851', '1058', '822', '854', '1168', '1149', '967', '1041', '973', '1001', 'P51060']
 
 # 1:1 / 1:N 数据关系映射 (来源: 各接口 step2 脚本的 is_one_to_one 参数)
 # 1001为1:1(分公司查总公司,返回单个总公司对象), 在1:1集合中
 ONE_TO_ONE_INTERFACES = {'819', '854', '1149', '1168', '1001', 'P51060'}
+
+# 各接口频次(账期/预付款)与显示标签, 与预警脚本 daily_call_analysis_alert_notebook_v2.py 保持一致
+FREQ_DAILY = 'daily'
+FREQ_MONTHLY = 'monthly'
+FREQ_HALF_YEAR = 'half_year'
+INTERFACE_FREQUENCY = {
+    # 接口ID: (账期频次, 预付款频次)
+    '819':    (FREQ_DAILY,     FREQ_MONTHLY),
+    '822':    (FREQ_DAILY,     FREQ_MONTHLY),
+    '851':    (FREQ_DAILY,     FREQ_MONTHLY),
+    '854':    (FREQ_DAILY,     FREQ_MONTHLY),
+    '967':    (FREQ_MONTHLY,   FREQ_MONTHLY),
+    '973':    (FREQ_MONTHLY,   FREQ_MONTHLY),
+    '1058':   (FREQ_DAILY,     FREQ_MONTHLY),
+    '1041':   (FREQ_DAILY,     FREQ_MONTHLY),
+    '1149':   (FREQ_DAILY,     FREQ_MONTHLY),
+    '1168':   (FREQ_MONTHLY,   FREQ_MONTHLY),
+    '1001':   (FREQ_DAILY,     FREQ_MONTHLY),
+    'P51060': (FREQ_MONTHLY,   FREQ_HALF_YEAR),
+}
+FREQ_LABEL = {
+    FREQ_DAILY:      'Daily',
+    FREQ_MONTHLY:    'Monthly',
+    FREQ_HALF_YEAR:  'Half Year',
+}
+
+
+def get_frequency_display(interface_key):
+    """返回与预警邮件一致的频次显示: '账期: Daily / 预付: Monthly'"""
+    non_prepaid_freq, prepaid_freq = INTERFACE_FREQUENCY.get(
+        interface_key, (FREQ_DAILY, FREQ_MONTHLY)
+    )
+    return f"账期: {FREQ_LABEL[non_prepaid_freq]} / 预付: {FREQ_LABEL[prepaid_freq]}"
 
 # 最终输出目录 + 保留天数, 从 config.json 的 data_export 段读取
 _export_cfg = get_data_export_config(CONFIG)
@@ -138,21 +172,53 @@ def export_interface_csv(spark, interface_key, interface_name, dt, workspace_dir
     再用 Python 文件 API 直接写到 Workspace (driver 可写)。
     """
     table = get_target_table_name(interface_key)
+    # 用P1分区(Phase 1写入的分区)精准定位,避免P2复制到last_batch_date的数据被重复统计
+    p1_dt = get_p1_dt(CONFIG, interface_key, dt, monthly_dt, half_year_dt)
 
-    # 查 T-1 和月度跑批日两个分区 + 当天解析写入的数据
-    cnt = spark.sql(
-        f"SELECT COUNT(*) FROM {table} "
-        f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
-        f"AND data_create_time >= '{today_start_str}' AND data_create_time < '{tomorrow_start_str}'"
-    ).collect()[0][0]
+    # 检测公司名列: 1058 优先 main_company_name (company_name 是风险相关公司不是客户公司)
+    field_names = {f.name for f in spark.table(table).schema.fields}
+    if 'main_company_name' in field_names:
+        company_col = 'main_company_name'
+    elif 'company_name' in field_names:
+        company_col = 'company_name'
+    else:
+        company_col = None
+
+    call_record_table = get_api_record_table(interface_key)
+
+    if company_col:
+        # 硬关联回调用记录表, 只导出"今天成功调用"对应的解析行
+        # 避免 Phase 2 补充跑批改写 data_create_time 后污染当天导出
+        cnt_sql = f"""
+          SELECT COUNT(*) FROM {table} t
+          INNER JOIN (
+            SELECT DISTINCT input_param FROM {call_record_table}
+            WHERE dt = '{p1_dt}'
+              AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}'
+              AND status_code = 0
+          ) s ON t.{company_col} = s.input_param
+          WHERE t.dt = '{p1_dt}'
+        """
+        data_sql = f"""
+          SELECT t.* FROM {table} t
+          INNER JOIN (
+            SELECT DISTINCT input_param FROM {call_record_table}
+            WHERE dt = '{p1_dt}'
+              AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}'
+              AND status_code = 0
+          ) s ON t.{company_col} = s.input_param
+          WHERE t.dt = '{p1_dt}'
+        """
+    else:
+        # 无公司列, 退化到只查 P1 分区(无法关联调用记录)
+        cnt_sql = f"SELECT COUNT(*) FROM {table} WHERE dt = '{p1_dt}'"
+        data_sql = f"SELECT * FROM {table} WHERE dt = '{p1_dt}'"
+
+    cnt = spark.sql(cnt_sql).collect()[0][0]
     if cnt == 0:
         return None
 
-    df = spark.sql(
-        f"SELECT * FROM {table} "
-        f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
-        f"AND data_create_time >= '{today_start_str}' AND data_create_time < '{tomorrow_start_str}'"
-    )
+    df = spark.sql(data_sql)
 
     # TIMESTAMP 列先 cast 成 string, 避免 toPandas 时 nanosecond 超范围 casting 报错
     # (pandas datetime64[ns] 只覆盖 1677-2262 年, 819 表存在超范围值)
@@ -198,6 +264,73 @@ for ik in ALL_INTERFACE_KEYS:
 print()
 
 
+# ========== 3.5 导出 ADS 结果表 (进 ZIP, 不进解析统计) ==========
+
+# 不进解析统计的 ADS 层结果表, 仅打包进 ZIP 供下游查阅
+# 无 dt 分区表读全表; 有 dt 分区表按当天 dt 过滤
+ADS_RESULT_TABLES = [
+    # (上游表全名, 是否有 dt 分区, CSV 文件名前缀)
+    ("powerlink_prod.pw_ads.ads_pw_credit_metric_nd", False, "ads_pw_credit_metric_nd"),
+]
+
+def export_ads_result_csv(spark, table_full, has_dt, dt, csv_prefix, workspace_dir):
+    """导出 ADS 结果表为 CSV (UTF-8 BOM, Excel 兼容)。
+
+    与 export_interface_csv 的区别:
+    - 不查 data_create_time 窗口 (ADS 表无此字段, 是加工后结果)
+    - 有 dt 分区按 dt 过滤当天, 无 dt 分区读全表
+    - 不进解析统计, 仅打包进 ZIP
+    """
+    try:
+        if has_dt:
+            df = spark.sql(f"SELECT * FROM {table_full} WHERE dt = '{dt}'")
+        else:
+            df = spark.sql(f"SELECT * FROM {table_full}")
+        row_count = df.count()
+    except Exception as e:
+        print(f"  {csv_prefix}: 读取失败 - {e}")
+        return None
+    if row_count == 0:
+        return None
+
+    # TIMESTAMP 列 cast 成 string, 避免 toPandas nanosecond 超范围
+    timestamp_cols = [f.name for f in df.schema.fields if str(f.dataType).startswith('Timestamp')]
+    if timestamp_cols:
+        select_exprs = [
+            F.col(c).cast('string').alias(c) if c in timestamp_cols else F.col(c)
+            for c in df.columns
+        ]
+        df = df.select(*select_exprs)
+
+    pdf = df.toPandas()
+    csv_name = f"{csv_prefix}.csv"
+    csv_path = os.path.join(workspace_dir, csv_name)
+    pdf.to_csv(csv_path, index=False, encoding='utf-8-sig')
+    return csv_path, row_count
+
+
+print(f"[Step 3.5] 导出 ADS 结果表 (进 ZIP, 不进解析统计):")
+ads_csv_files = []  # (csv_prefix, csv_path, size_bytes, row_count)
+for table_full, has_dt, csv_prefix in ADS_RESULT_TABLES:
+    try:
+        result = export_ads_result_csv(spark, table_full, has_dt, dt, csv_prefix, day_dir)
+        if result is None:
+            dt_tag = f"dt={dt}" if has_dt else "全表"
+            print(f"  {csv_prefix}: 0 行 ({dt_tag}, 跳过)")
+            continue
+        ads_csv_path, ads_row_count = result
+        ads_size = os.path.getsize(ads_csv_path)
+        ads_csv_files.append((csv_prefix, ads_csv_path, ads_size, ads_row_count))
+        size_kb = ads_size / 1024
+        size_str = f"{size_kb/1024:.2f} MB" if size_kb >= 1024 else f"{size_kb:.2f} KB"
+        dt_tag = f"dt={dt}" if has_dt else "全表"
+        print(f"  {csv_prefix}: {ads_row_count:,} 行, {size_str} ({dt_tag}) → {csv_prefix}.csv")
+    except Exception as e:
+        print(f"  {csv_prefix}: 导出失败 - {e}")
+
+print()
+
+
 # ========== 4. 打包 ZIP ==========
 
 print(f"[Step 4] 打包 ZIP:")
@@ -207,6 +340,10 @@ with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
         arcname = os.path.basename(path)
         zf.write(path, arcname)
         print(f"  + {arcname}")
+    for csv_prefix, path, _, _ in ads_csv_files:
+        arcname = os.path.basename(path)
+        zf.write(path, arcname)
+        print(f"  + {arcname} (ADS 结果表)")
 
 zip_size = os.path.getsize(zip_path)
 zip_mb = zip_size / (1024 * 1024)
@@ -227,13 +364,15 @@ def collect_interface_stats(spark, interface_key, interface_name, dt, customer_d
     """
     table = get_target_table_name(interface_key)
     relationship = '1:1' if interface_key in ONE_TO_ONE_INTERFACES else '1:N'
+    # 用P1分区精准定位,避免P2复制数据被重复统计
+    p1_dt = get_p1_dt(CONFIG, interface_key, dt, monthly_dt, half_year_dt)
 
-    # 调用成功数 (来自调用记录表, 同样查两分区 + 当天创建时间)
+    # 调用成功数 (来自调用记录表, 同样查P1分区 + 当天创建时间)
     try:
         call_record_table = get_api_record_table(interface_key)
         success_count = spark.sql(
             f"SELECT COUNT(*) FROM {call_record_table} "
-            f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
+            f"WHERE dt = '{p1_dt}' "
             f"AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}' "
             f"AND status_code = 0"
         ).collect()[0][0]
@@ -241,21 +380,29 @@ def collect_interface_stats(spark, interface_key, interface_name, dt, customer_d
         print(f"  [WARN] {interface_key} 读取调用记录失败: {e}")
         success_count = 0
 
-    total_count = spark.sql(
-        f"SELECT COUNT(*) FROM {table} "
-        f"WHERE dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}') "
-        f"AND data_create_time >= '{today_start_str}' AND data_create_time < '{tomorrow_start_str}'"
-    ).collect()[0][0]
-    if total_count == 0:
+    # 解析行数: 硬关联回调用记录表, 只统计"今天成功调用"对应的解析行
+    # 避免 Phase 2 补充跑批改写 data_create_time 后污染当天统计
+    try:
+        call_record_table = get_api_record_table(interface_key)
+    except Exception as e:
+        print(f"  [WARN] {interface_key} 读取调用记录表名失败: {e}")
         return {
             'interface_key': interface_key,
             'interface_name': interface_name,
-            'frequency': get_api_config(CONFIG, interface_key).get('frequency', 'daily'),
+            'frequency': get_frequency_display(interface_key),
             'relationship': relationship,
             'success_count': success_count,
             'total': 0, 'prepaid': 0, 'non_prepaid': 0, 'uncategorized': 0,
             'has_data': False, 'has_company_col': False,
         }
+
+    # 今天成功调用的 input_param 集合 (去重)
+    today_success_params_sql = f"""
+      SELECT DISTINCT input_param FROM {call_record_table}
+      WHERE dt = '{p1_dt}'
+        AND create_time >= '{today_start_str}' AND create_time < '{tomorrow_start_str}'
+        AND status_code = 0
+    """
 
     # 检测公司名列: 1058 优先 main_company_name (company_name 是风险相关公司不是客户公司)
     field_names = {f.name for f in spark.table(table).schema.fields}
@@ -267,36 +414,54 @@ def collect_interface_stats(spark, interface_key, interface_name, dt, customer_d
         company_col = None
 
     if not company_col:
+        # 无公司列, 退化到只查 P1 分区行数(无法关联调用记录)
+        total_count = spark.sql(
+            f"SELECT COUNT(*) FROM {table} WHERE dt = '{p1_dt}'"
+        ).collect()[0][0]
         return {
             'interface_key': interface_key,
             'interface_name': interface_name,
-            'frequency': get_api_config(CONFIG, interface_key).get('frequency', 'daily'),
+            'frequency': get_frequency_display(interface_key),
             'relationship': relationship,
             'success_count': success_count,
             'total': total_count, 'prepaid': 0, 'non_prepaid': 0,
             'uncategorized': total_count,
-            'has_data': True, 'has_company_col': False,
+            'has_data': total_count > 0, 'has_company_col': False,
         }
 
     sql = f"""
+    WITH today_success AS (
+      {today_success_params_sql}
+    )
     SELECT
       COUNT(*) as total,
       SUM(CASE WHEN c.is_prepaid = '是' THEN 1 ELSE 0 END) as prepaid,
       SUM(CASE WHEN c.is_prepaid = '否' THEN 1 ELSE 0 END) as non_prepaid,
       SUM(CASE WHEN c.is_prepaid IS NULL OR c.is_prepaid NOT IN ('是','否') THEN 1 ELSE 0 END) as uncategorized
     FROM {table} t
+    INNER JOIN today_success s ON t.{company_col} = s.input_param
     LEFT JOIN (
       SELECT DISTINCT name, is_prepaid FROM {CUSTOMER_TABLE}
       WHERE dt = '{customer_dt}'
     ) c ON t.{company_col} = c.name
-    WHERE t.dt IN ('{dt}', '{monthly_dt}', '{half_year_dt}')
-      AND t.data_create_time >= '{today_start_str}' AND t.data_create_time < '{tomorrow_start_str}'
+    WHERE t.dt = '{p1_dt}'
     """
     r = spark.sql(sql).collect()[0]
+    total_count = r.total or 0
+    if total_count == 0:
+        return {
+            'interface_key': interface_key,
+            'interface_name': interface_name,
+            'frequency': get_frequency_display(interface_key),
+            'relationship': relationship,
+            'success_count': success_count,
+            'total': 0, 'prepaid': 0, 'non_prepaid': 0, 'uncategorized': 0,
+            'has_data': False, 'has_company_col': True,
+        }
     return {
         'interface_key': interface_key,
         'interface_name': interface_name,
-        'frequency': get_api_config(CONFIG, interface_key).get('frequency', 'daily'),
+        'frequency': get_frequency_display(interface_key),
         'relationship': relationship,
         'success_count': success_count,
         'total': r.total,
@@ -332,7 +497,7 @@ for ik in ALL_INTERFACE_KEYS:
         print(f"  {ik}({interface_name}): 统计失败 - {e}")
         stats_list.append({
             'interface_key': ik, 'interface_name': interface_name,
-            'frequency': 'daily', 'relationship': '1:N', 'success_count': 0,
+            'frequency': get_frequency_display(ik), 'relationship': '1:N', 'success_count': 0,
             'total': 0, 'prepaid': 0, 'non_prepaid': 0, 'uncategorized': 0,
             'has_data': False, 'has_company_col': False, 'error': str(e),
         })
@@ -601,7 +766,7 @@ print()
 # ========== 8. 汇总 ==========
 
 total_rows = sum(c[4] for c in csv_files)
-uncompressed = sum(c[3] for c in csv_files)
+uncompressed = sum(c[3] for c in csv_files) + sum(a[2] for a in ads_csv_files)
 uncompressed_mb = uncompressed / (1024 * 1024)
 ratio = (zip_size / uncompressed * 100) if uncompressed else 0
 
@@ -610,6 +775,7 @@ print("【导出完成】")
 print("=" * 60)
 print(f"日期: {run_date} (dt={dt})")
 print(f"导出接口: {len(csv_files)}/{len(ALL_INTERFACE_KEYS)} 个有数据")
+print(f"ADS 结果表: {len(ads_csv_files)}/{len(ADS_RESULT_TABLES)} 个有数据 (进 ZIP, 不进解析统计)")
 print(f"总行数: {total_rows:,} 行")
 print(f"未压缩合计: {uncompressed_mb:.2f} MB")
 print(f"ZIP 大小: {zip_mb:.2f} MB (压缩比 {ratio:.1f}%)")

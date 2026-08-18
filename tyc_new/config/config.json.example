@@ -78,5 +78,22 @@
   "data_export": {
     "base_dir": "/Workspace/Shared/powerlink_warehouse/tyc_new/data_exports",
     "retention_days": 30
+  },
+  "manual_load": {
+    "_comment": "Access(.accdb)/Excel(.xlsx) 手工数据加载配置. 环境变量 ACCESS_FORCE_RELOAD=true 可强制全量重跑(忽略 meta 表 md5 比对).",
+    "catalog": "powerlink_prod",
+    "schema": "pw_manual",
+    "table_prefix": "manual_",
+    "volume_base": "/Volumes/powerlink_prod/default/env/manual/",
+    "upload_dir": "access_uploads/",
+    "processed_dir": "access_uploads/processed/",
+    "jar_dir": "jars/",
+    "meta_table": "access_load_meta",
+    "jvm_heap_gb": 12,
+    "write_mode": "overwrite",
+    "jdbc_params": ";memory=true",
+    "ucanaccess_jar": "ucanaccess-5.0.1.jar",
+    "ucanaccess_deps": ["jackcess-3.0.1.jar", "commons-lang3-3.8.1.jar", "commons-logging-1.2.jar", "hsqldb-2.5.0.jar"],
+    "processed_keep": 3
   }
 }

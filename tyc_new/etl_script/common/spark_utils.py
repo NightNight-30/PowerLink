@@ -27,10 +27,10 @@ from pyspark.sql.functions import monotonically_increasing_id, current_timestamp
 
 # ========== 常量 ==========
 
-CATALOG = 'powerlink'
+CATALOG = 'powerlink_prod'
 SCHEMA = 'pw_ods'
 CUSTOMER_TABLE = f'{CATALOG}.pw_ods.ods_credit_api_input_company_df'
-HK_TW_WHITELIST_TABLE = f'{CATALOG}.{SCHEMA}.ods_init_white_company_list_nd'
+HK_TW_WHITELIST_TABLE = f'{CATALOG}.{SCHEMA}.ods_credit_api_white_company_list_nd'
 BRANCH_COMPANY_TABLE = f'{CATALOG}.{SCHEMA}.ods_credit_api_input_branch_company_df'
 NEW_CUSTOMERS_TABLE = f'{CATALOG}.{SCHEMA}.ods_credit_api_input_new_customers_df'
 
@@ -93,6 +93,9 @@ def get_spark() -> SparkSession:
         spark = SparkSession.builder.getOrCreate()
         # 启用动态分区覆盖（仅影响当前Session的写操作配置）
         spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        # 统一 Spark SQL 时区为上海（current_date / current_timestamp 受此控制）
+        # Databricks 集群默认 UTC，3:30 北京时间跑批时 UTC 是前一天 19:30
+        spark.conf.set("spark.sql.session.timeZone", "Asia/Shanghai")
         return spark
     except Exception as e:
         print(f"[FATAL] 获取SparkSession失败: {e}")
@@ -104,7 +107,7 @@ def get_spark() -> SparkSession:
 def get_hk_tw_whitelist(spark) -> set:
     """
     读取HK/TW白名单(免跑接口的公司集合)
-    白名单由 workflow/ods/build_ods_init_white_company_list_nd.sql 每日全量重建
+    白名单由 ods_init_1.ipynb section 4 每日全量重建(源SQL: workflow/ods/build_ods_credit_api_white_company_list_nd.sql)
     读取失败时返回空set(跳过过滤,保证可用性)
     """
     try:
@@ -127,7 +130,7 @@ def get_company_list(spark, specific_company: str = None, frequency: str = 'dail
         - 月度跑批日: 全部客户
         - 非月度跑批日: 账期 + 新增预付款 (is_prepaid='否' OR (is_new_customer='是' AND is_prepaid='是'))
       monthly接口 (frequency='monthly'):
-        - 月度跑批日: 全部客户 (prepaid_run_months非配置月份时仅账期)
+        - 月度跑批日: 全部客户 (prepaid_run_months非配置月份时账期+新增预付款, 老预付款半年才跑)
         - 非月度跑批日: 新增客户且非"曾经存在→消失→又回来" (is_new_customer='是' AND in_monthly_batch='否')
 
     force_all=True (INIT_MODE): 全部客户
@@ -172,8 +175,8 @@ def get_company_list(spark, specific_company: str = None, frequency: str = 'dail
         else:
             if is_batch_day:
                 if prepaid_run_months is not None and today.month not in prepaid_run_months:
-                    base_sql += " AND is_prepaid = '否'"
-                    print(f"[INFO] monthly月度跑批日 + 半年跑批配置{prepaid_run_months}: 当前{today.month}月非预付款跑批月, 仅处理账期客户 (dt={query_dt})")
+                    base_sql += " AND (is_prepaid = '否' OR (is_new_customer = '是' AND is_prepaid = '是'))"
+                    print(f"[INFO] monthly月度跑批日 + 半年跑批配置{prepaid_run_months}: 当前{today.month}月非预付款跑批月, 处理账期+新增预付款客户 (dt={query_dt})")
                 else:
                     print(f"[INFO] monthly月度跑批日({monthly_day}号): 处理全部客户 (dt={query_dt})")
             else:
@@ -274,21 +277,17 @@ def get_new_customers_list(spark, customer_dt: str = None, exclude_hk_tw: bool =
 def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: int, customer_dt: str = None, exclude_hk_tw: bool = False, prepaid_run_months: Optional[List[int]] = None) -> List[str]:
     """
     获取需要补充处理的预付款客户列表
-    条件: is_prepaid='是' 且 最近预付款跑批日至今无成功调用记录(status_code=0)
-    补充处理写入月度跑批日分区，下游无需改动
+    条件: is_prepaid='是' 且 数据不在跑批日分区(跑批日分区无成功调用记录)
+    补充处理写入跑批日分区，下游无需改动
     exclude_hk_tw=True时: 排除HK/TW白名单中的公司(免跑接口)
     prepaid_run_months: 预付款半年跑批月份(如[1,7])。配了则:
-      - 非跑批日返回空(Phase2仅跑批日跑catch-up新增预付款,不每天跑)
       - processed_since截止日=最近半年跑批日分区(非当月跑批日),因为预付款上次调用在半年边界
-      未配(None): 原行为(每天可跑Phase2,processed_since=当月跑批日)
+    未配(None): processed_since=当月月度跑批日分区
+    processed_since查dt=last_batch_date(而非dt>=),找"数据不在跑批日分区的预付款客户":
+      - daily: 新增预付款在t-1,不在last_batch_date→supp包含→Phase2从t-1补到last_batch_date
+      - monthly: 新增预付款在last_batch_date(=step1写入分区)→supp不含→Phase2跳过(Phase1已覆盖)
+      - P51060半年跑批: 新增预付款在last_monthly_batch_date,不在last_prepaid_batch_date→supp包含→Phase2从月度分区补到半年分区
     """
-    # 半年跑批: 非跑批日不跑Phase 2 (仅跑批日catch-up新增预付款,省配额)
-    if prepaid_run_months is not None:
-        today = datetime.now()
-        if today.day != monthly_day:
-            print(f"[补充跑批] 半年跑批配置{prepaid_run_months}: 今天非月度跑批日({monthly_day}号), 跳过Phase 2")
-            return []
-
     # 1. 获取客户表分区日期
     if customer_dt:
         query_dt = customer_dt
@@ -320,13 +319,17 @@ def get_supplementary_prepaid_companies(spark, interface_key: str, monthly_day: 
     else:
         last_batch_date = get_last_monthly_batch_date({'schedule': {'monthly_day': monthly_day}})
 
-    # 4. 查询processed_since至今已成功处理的预付款客户
-    call_record_table = get_api_record_table(interface_key)
+    # 4. 查询跑批日分区已成功处理的预付款客户(查目标解析表, 而非调用记录表)
+    # 原因: Phase 2 合并写入是写入目标解析表, 判据也必须查同一张表, 否则已合并过的公司
+    # 每天都会被列入"新增"重新处理, 配合 write_supplementary_data 的覆盖写入会丢数据
+    target_table = get_target_table_name(interface_key)
+    schema_fields = [f.name for f in spark.table(target_table).schema]
+    company_col = 'main_company_name' if 'main_company_name' in schema_fields else 'company_name'
     processed_since = spark.sql(
-        f"SELECT DISTINCT input_param FROM {call_record_table} "
-        f"WHERE dt >= '{last_batch_date}' AND status_code = 0"
+        f"SELECT DISTINCT {company_col} FROM {target_table} "
+        f"WHERE dt = '{last_batch_date}' AND {company_col} IS NOT NULL"
     )
-    processed_set = set([row.input_param for row in processed_since.collect()])
+    processed_set = set([row[company_col] for row in processed_since.collect()])
 
     # 5. 补充 = 预付款 - 已处理
     supplementary = [c for c in prepaid_list if c not in processed_set]
@@ -512,6 +515,57 @@ def write_target_data(spark, parsed_rows: List[Dict], table_name: str, dt: str,
         print(f"[INFO] 写入解析数据(全量): {len(parsed_rows)}条 (dt={dt})")
 
 
+def write_supplementary_data(spark, table_name: str, dt: str, last_batch_date: str,
+                             supp_companies: List[str]):
+    """
+    Phase 2优化: 从dt分区目标表读取supp_companies已解析数据,
+    INSERT 到last_batch_date分区(纯追加, 不覆盖现有数据, 不会丢数据)
+
+    替代旧逻辑: 读last_batch_date全量现有数据→排除supp_companies→合并→overwrite整分区
+    旧逻辑问题: existing_df 的 NOT IN 会把"上次合并过但本次step1没调用"的公司排除掉,
+    overwrite 后这些公司永久丢失. 改用 INSERT 纯追加, 即使判据误判也只产生重复行(可清理), 不丢数据
+
+    前置条件: get_supplementary_prepaid_companies 已改用解析表判据(而非调用记录表),
+    保证 supp_companies 只含真正未在 last_batch_date 解析表出现过的公司, 不会重复 INSERT
+
+    参数:
+      - dt: 取数分区(P1已解析的数据在这里)
+      - last_batch_date: 写入分区(跑批日分区)
+      - supp_companies: 需要补充的预付款客户列表
+    """
+    if not supp_companies:
+        print("[补充跑批] 无新增预付款客户需要补充解析")
+        return
+
+    # 适配1058的main_company_name字段(1058同时有main_company_name和company_name,前者是主公司)
+    schema_fields = [f.name for f in spark.table(table_name).schema]
+    if 'main_company_name' in schema_fields:
+        company_col = 'main_company_name'
+    else:
+        company_col = 'company_name'
+
+    company_list_sql = ",".join([f"'{c}'" for c in supp_companies])
+
+    # 1. 从dt分区读取supp_companies已解析数据(无需重新解析JSON)
+    new_data_df = spark.sql(
+        f"SELECT * FROM {table_name} "
+        f"WHERE dt = '{dt}' AND {company_col} IN ({company_list_sql}) "
+        f"AND {company_col} IS NOT NULL"
+    )
+
+    new_count = new_data_df.count()
+    if new_count == 0:
+        print(f"[补充跑批] dt={dt}分区无supp客户已解析数据,跳过")
+        return
+
+    # 2. 改 dt 为 last_batch_date (保留原 data_create_time, 避免污染今天时间窗口统计)
+    new_data_df = new_data_df.withColumn('dt', lit(last_batch_date))
+
+    # 3. INSERT 追加到 last_batch_date 分区(纯追加, 不覆盖现有数据)
+    new_data_df.write.mode("append").format("delta").saveAsTable(table_name)
+    print(f"[补充跑批] INSERT 完成: {len(supp_companies)}个预付款客户({new_count}条) 从dt={dt}追加到dt={last_batch_date}")
+
+
 # ========== Step2: 读取成功记录 ==========
 
 def get_today_success_records(spark, dt: str, interface_key: str,
@@ -592,6 +646,16 @@ def timestamp_to_datetime(ts: Any) -> Optional[datetime]:
     BIGINT时间戳 → datetime对象
     >=1e10 → 毫秒级(÷1000)；<1e10 → 秒级(直接转)
     返回datetime对象而非字符串，适配Delta TIMESTAMP列
+
+    注意: 远期哨兵时间戳(常表示"未发生"/"无限期"/"长期有效", 如 UTC 9999-12-31
+    或更晚)统一返回 None。原因:
+      1. Python datetime.max = 9999-12-31 23:59:59, 上海+8h 后 UTC 9999-12-31
+         16:00:00 之后的值在本地时区会溢出 year 10000;
+      2. 即便不溢出, year 9999 的值传到 Spark → Arrow convert_timestamp
+         (`value.astimezone(timezone.utc)`) 时, 若 Spark 按 session timeZone
+         (Asia/Shanghai) 解析 naive datetime 再转 UTC, 仍可能在边界值触发
+         "year 10000 is out of range";
+      3. 业务语义上 "9999-12-31" = NULL, 返回 None 更准确。
     """
     if ts is None or ts == '' or ts == 0:
         return None
@@ -601,7 +665,19 @@ def timestamp_to_datetime(ts: Any) -> Optional[datetime]:
             ts_seconds = int(ts_num // 1000)
         else:
             ts_seconds = int(ts_num)
-        return datetime.fromtimestamp(ts_seconds)
+        from datetime import timezone
+        dt_utc = datetime.fromtimestamp(ts_seconds, tz=timezone.utc)
+        # 远期哨兵值: UTC 年份 >= 9999 直接返回 None, 避免 Spark Arrow 转换溢出
+        if dt_utc.year >= 9999:
+            return None
+        # 上海时区转换可能溢出(理论上 dt_utc.year < 9999 不会, 但兜底)
+        try:
+            dt_local = dt_utc.astimezone()
+        except (OverflowError, ValueError):
+            return None
+        if dt_local.year > 9999:
+            return None
+        return dt_local.replace(tzinfo=None)
     except (ValueError, TypeError, OSError, OverflowError):
         return None
 

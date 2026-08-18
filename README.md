@@ -114,9 +114,9 @@ Step1内部采用两阶段分离，节省API调用次数：
 | Phase2(补充) | 新增预付款客户，写月度跑批日-1分区 | 新增预付款客户，写月度跑批日-1分区 |
 | INIT_MODE(初始化) | 全部客户(含预付款)，写t-1分区 | 全部客户(含预付款)，写月度跑批日-1分区 |
 
-- **检测**: call record表查最近月度跑批日至今无成功记录的预付款客户
-- **写入**: 补充数据写入最近月度跑批日跑批时写入的分区(月度跑批日-1)，与正常月度跑批写入分区一致
-- **防重复**: 月度分区有记录后，下次检测查到 → 跳过
+- **检测**(2026-08-18 修复): **查目标解析表**(同 Phase 2 写入表) `SELECT DISTINCT company_name FROM 目标表 WHERE dt=last_batch_date`, 找预付款名单中不在该结果集的公司。**原查调用记录表 Bug**: 已合并过的公司每天被识别为"新增"重复处理
+- **写入**(2026-08-18 修复): `mode("append")` INSERT 追加, 从今天dt分区读 supp 客户已解析数据, 改 dt 为 last_batch_date 追加写入。**原 overwrite 整分区 Bug**: `existing_df` 的 `NOT IN supp_companies` 把"上次已合并但本次step1没调用"的公司排除掉, overwrite 后永久丢失
+- **双保险**: 判据防误判已补过的公司为新客户, INSERT 防误判后覆盖丢数据
 - **分区统一**: `get_last_monthly_batch_date()` 返回 t-1 分区(monthly_day-1)，保证三种写入路径分区一致
 
 ### INIT_MODE 初始化模式
@@ -175,6 +175,7 @@ Step1内部采用两阶段分离，节省API调用次数：
 - 通过 Microsoft Graph API 发送 tesa 品牌样式预警邮件
 - 收件人为业务相关人员
 - 邮件标题格式: `✅【接口调用数据】业务日期 YYYYMMDD` / 异常时 `⚠️【接口调用数据】业务日期 YYYYMMDD`
+- **今日非跑批日接口区块**(2026-08-18 增强): 每个非跑批日接口追加 `月度跑批日为每月{monthly_day}号`, DNB P51060 额外追加 `半年度跑批日为1月和7月的5号`
 
 **数据取值范围**(2026-06-22 调整)：查 `dt IN (T-1, 最近月度跑批日)` 两分区 + `create_time ∈ [T, T+1)` 当天创建时间过滤。覆盖账期客户(每天跑)+新增预付款客户(非月度跑批日补充跑,调用记录写 T-1 分区)两种场景,排除月度跑批日跑的历史数据。客户表 JOIN 统一用 `dt = T-1`(最新分区)。
 
@@ -188,6 +189,7 @@ Step1内部采用两阶段分离，节省API调用次数：
 | Phase 2 | Graph API 复用 alert 段凭据发送邮件，ZIP 普通附件 + tesa logo 内联 |
 
 - 邮件统计表 9 列: 接口ID/接口名称/频次/调用成功/解析行数/数据关系(1:1/1:N)/账期客户/预付款客户/未分类
+- **频次显示**(2026-08-18 调整): `get_frequency_display()` 返回 `账期: X / 预付: Y` 格式, P51060 预付款为 `Half Year` 体现半年跑批, 与预警邮件一致(只改显示层不动调用逻辑)
 - Databricks Workspace 写入限制绕过: `toPandas()` + Python 文件 API(driver 可写 Workspace)
 - TIMESTAMP 列超范围坑: cast 成 string 再 toPandas
 - 1058 特殊处理: 优先 `main_company_name`(搜索入参=客户公司)，`company_name` 是风险相关公司不可关联
@@ -195,6 +197,23 @@ Step1内部采用两阶段分离，节省API调用次数：
 **数据取值范围**(2026-06-22 调整)：与预警脚本同策略,但过滤字段是解析表的 `data_create_time`(不是调用记录表的 `create_time`)。查 `dt IN (T-1, 最近月度跑批日)` + `data_create_time ∈ [T, T+1)`。新增预付款客户补充跑时 step2 把 `dt` 改成 `last_batch_date`,但 `data_create_time=T` 仍能被捕获。ZIP 只包含有数据的表(`cnt==0` 跳过导出)。
 
 详细设计文档存放在 Obsidian `claude变更记录/project/powerlink/其他/数据附件邮件发送设计.md`
+
+## Access手工数据加载系统
+
+业务方每日上传 `.accdb`/`.xlsx` 手工表到 Volume, 加载到 Delta 表:
+
+| 脚本 | 调度 | 作用 |
+|:-----|:-----|:-----|
+| `access_to_delta_notebook.py` | 业务方上传后手动触发/Jobs | 读 `.accdb` 走 JayDeBeApi+UCanAccess JDBC → pandas → Spark DataFrame → Delta 表 `manual_*` |
+| `access_load_alert_notebook.py` | 每天 22:00 | 读 `access_load_meta` 当天记录 → 各 Delta 表实时 COUNT → Graph API 发 HTML 邮件 |
+
+- **meta 表**: `powerlink_prod.pw_manual.access_load_meta` (filename/md5/processed_at/table_names/table_counts/status)
+- **`table_counts` 列**: JSON 格式存 `{原表名: 行数}`, 供预警邮件做最近两次成功解析差异对比
+- **FORCE_RELOAD**: 环境变量 `ACCESS_FORCE_RELOAD=true` 强制全量重跑(忽略 MD5 比对)
+- **不发邮件条件**: 当天 meta 表无任何记录(无文件需要解析)
+- **预警邮件表格**: 原表名/Delta表名/上次行数/本次行数/变更, 变更列含 新增/移除/+N/-N/- (未变)
+- **解析规则区块**: 表名清洗/列名清洗/类型映射/写入模式/去重机制 5 项说明
+- **JVM 坑**: UC Volume 是 FUSE 挂载, JVM 不能直接加载 JAR, 必须复制到 `/tmp/jars/`; `;memory=true` JDBC 参数让 hsqldb 在 JVM 内存建镜像(Volume 只读)
 
 ## 配置说明
 
@@ -207,6 +226,7 @@ Step1内部采用两阶段分离，节省API调用次数：
 | `apis.*` | 各接口URL/频次/计费/预付款过滤/正常错误码 |
 | `alert` | 预警邮件+数据附件邮件(Graph API认证+`cloud`字段+收件人+logo路径) |
 | `data_export` | 每日数据导出配置(输出目录`base_dir`+保留天数`retention_days`) |
+| `manual_load` | Access(.accdb)/Excel(.xlsx) 手工数据加载配置(catalog/schema/volume路径/JVM堆/meta表/保留天数, 详见下文「Access手工数据加载」) |
 | `error_code_desc` | 天眼查/邓白氏错误码对照表 |
 
 **Graph API 云环境**(`alert.cloud` 字段)：

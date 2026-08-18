@@ -226,3 +226,31 @@ def get_alert_config(config: Dict) -> Dict:
 def get_data_export_config(config: Dict) -> Dict:
     """获取每日数据导出配置(输出目录、保留天数)"""
     return config.get('data_export', {})
+
+
+def get_manual_load_config(config: Dict) -> Dict:
+    """获取 Access/Excel 手工数据加载配置(catalog/schema/volume 路径/JVM 堆等)"""
+    return config.get('manual_load', {})
+
+
+def get_p1_dt(config: Dict, interface_key: str, dt: str, monthly_dt: str, half_year_dt: str) -> str:
+    """
+    获取接口P1(Phase 1)写入的分区dt,用于预警/导出邮件统计时精准定位P1分区,
+    避免P2复制到last_batch_date的数据因data_create_time为今天而被重复统计
+
+    daily接口: dt (t-1, P1写这里)
+    monthly接口: monthly_dt (月度跑批日分区, P1写这里)
+    P51060(半年跑批接口):
+      - INIT_MODE: half_year_dt (init数据写半年跑批分区)
+      - 正常模式: monthly_dt (账期写月度跑批分区,与monthly一致)
+
+    参数dt/monthly_dt/half_year_dt由调用方预先计算(预警/导出脚本已计算),
+    本函数只负责根据接口类型选用哪个,避免重复计算
+    """
+    frequency = get_api_config(config, interface_key).get('frequency', 'daily')
+    if frequency == 'daily':
+        return dt
+    prepaid_run_months = get_prepaid_run_months(config, interface_key)
+    if prepaid_run_months is not None and is_init_mode(config):
+        return half_year_dt
+    return monthly_dt
