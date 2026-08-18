@@ -94,6 +94,11 @@
     "jdbc_params": ";memory=true",
     "ucanaccess_jar": "ucanaccess-5.0.1.jar",
     "ucanaccess_deps": ["jackcess-3.0.1.jar", "commons-lang3-3.8.1.jar", "commons-logging-1.2.jar", "hsqldb-2.5.0.jar"],
-    "processed_keep": 3
+    "processed_keep": 3,
+    "alert": {
+      "_comment": "Access 加载预警邮件独立配置(收件人/标题前缀与接口调用预警分开). 缺省字段回退到顶层 alert 段(tenant_id/client_id/client_secret/from_addr/cloud/logo_path). 仅 to_addr 和 subject_prefix 用本段覆盖",
+      "to_addr": ["<ACCESS_ALERT_RECIPIENT_1>", "<ACCESS_ALERT_RECIPIENT_2>"],
+      "subject_prefix": "【手工数据加载预警】"
+    }
   }
 }

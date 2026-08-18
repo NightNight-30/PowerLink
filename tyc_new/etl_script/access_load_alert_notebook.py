@@ -395,21 +395,32 @@ print(f"邮件生成完成: {len(files_info)} 文件 / {len(table_counts)} 张 D
 
 def send_alert_email(config, html_content, run_date, need_alert):
     """通过 Microsoft Graph API (client_credentials) 发送预警邮件
-    复用 alert 段的 Graph 凭据, 与 daily_call_analysis_alert_notebook_v2.py 一致
+
+    收件人/标题前缀优先读 manual_load.alert, 缺省回退顶层 alert.
+    Graph 凭据(tenant_id/client_id/client_secret/from_addr/cloud/logo_path)始终读顶层 alert,
+    与 daily_call_analysis_alert_notebook_v2.py 共用同一份 Graph 配置.
     """
     alert_config = get_alert_config(config)
     if not alert_config:
         print("[WARNING] 未配置预警邮件(alert section), 跳过发送")
         return False
 
+    # manual_load.alert 用于覆盖 access 加载预警的收件人/标题前缀, 缺省回退顶层 alert
+    ml_alert = get_manual_load_config(config).get('alert', {}) if get_manual_load_config(config) else {}
+
     tenant_id = alert_config.get('tenant_id')
     client_id = alert_config.get('client_id')
     client_secret = alert_config.get('client_secret')
     from_addr = alert_config.get('from_addr')
-    to_addr = alert_config.get('to_addr', [])
-    subject_prefix = alert_config.get('subject_prefix', '【Access 加载预警】')
+    to_addr = ml_alert.get('to_addr') or alert_config.get('to_addr', [])
+    subject_prefix = ml_alert.get('subject_prefix') or alert_config.get('subject_prefix', '【Access 加载预警】')
     logo_path = alert_config.get('logo_path', '')
     cloud = alert_config.get('cloud', 'global')
+
+    if ml_alert.get('to_addr'):
+        print(f"[INFO] Access 加载预警使用 manual_load.alert 独立收件人: {len(to_addr)} 人")
+    else:
+        print(f"[INFO] manual_load.alert 未配 to_addr, 回退到顶层 alert 收件人: {len(to_addr)} 人")
 
     if cloud == 'china':
         token_endpoint = f"https://login.partner.microsoftonline.cn/{tenant_id}/oauth2/v2.0/token"
